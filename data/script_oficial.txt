@@ -1,0 +1,954 @@
+/*
+  HaxOle.OficialesV1
+  Version ligera para pegar en https://www.haxball.com/headless
+*/
+(function () {
+  "use strict";
+
+  var APP_ID = "haxole-app";
+  var state = {
+    room: null,
+    creating: false,
+    adminPass: "",
+    roomPassword: "",
+    redName: "Red",
+    blueName: "Blue",
+    reports: [],
+    current: null,
+    lastTouch: null,
+    secondTouch: null,
+    lastBallSample: null,
+    ballSpeed: 0,
+    skipNextStopReport: false,
+    started: false,
+    roomLink: "",
+    activeWebhookMode: null,
+    playerData: {},
+    signatures: [],
+    signatureKeys: {},
+    recordingActive: false,
+    officialMode: false
+  };
+
+  var GENERAL_WEBHOOK_URL = "https://discord.com/api/webhooks/1466163530100117686/q7KpNEm4f0IKPU9T3FCTC4cvd7ObW6yoIr2eHkQZugKktRrn0YBUDhjYYZOUIiUocMJ8";
+  var GENERAL_REC_WEBHOOK_URL = "https://discord.com/api/webhooks/1471551164771467378/IKZJ3Hk4jXp5-CZ9sftvl_5f2Tvfh_ThzeTdM4_4UHnK0EIpUpf7xs8O-Mv3FFXUoV91";
+  var HAXOLE_SCRIPT_VERSION = "2026-05-09-pedido-completo";
+  var DISCORD_LINK = "https://discord.gg/9vXQXPpxNd";
+  var SPEED_COEFFICIENT = 10;
+  var COMMAND_WEBHOOKS = {
+    x1: {
+      logs: "https://discord.com/api/webhooks/1495155858450157598/RygNvX_4qf-g7MBEbPdIxuZ859TC93pakhx3MBlQnkniATSIQvNk-fWUF-God9qjr4kY",
+      rec: "https://discord.com/api/webhooks/1495155750459412557/Eaa2JcvhwtRQcBjLu-5vu8MoHmH5LulQDhh9cSKL-J_tUYCQMwExvBD4qY9ROiLzY6Hk"
+    },
+    x2: {
+      logs: "https://discord.com/api/webhooks/1495155858450157598/RygNvX_4qf-g7MBEbPdIxuZ859TC93pakhx3MBlQnkniATSIQvNk-fWUF-God9qjr4kY",
+      rec: "https://discord.com/api/webhooks/1495155750459412557/Eaa2JcvhwtRQcBjLu-5vu8MoHmH5LulQDhh9cSKL-J_tUYCQMwExvBD4qY9ROiLzY6Hk"
+    },
+    x3: {
+      logs: "https://discord.com/api/webhooks/1495156800931102810/O6NkyjlwjJimKorQ8Eqh-iSCbjMQSBPWL1XRW254zqRgrERTRkOrcZXsZefIIY4GJZDq",
+      rec: "https://discord.com/api/webhooks/1495155980361797903/fcfhh2Xpg8h9qxO7Hqtmsv98ogJF4B3JOt78DAIKsuYqqZsNheCMSghoIzVNX7N95jED"
+    },
+    x4: {
+      logs: "https://discord.com/api/webhooks/1495156086142009439/pH0OUKHrgIaiNJdoyrfo5PvXOVcT_bsxST1FtRdRXX0ArKsgxH_Q0Vx9jHj3wZMGmjo_",
+      rec: "https://discord.com/api/webhooks/1466247614541467688/3DevMLYrgDW3GaLxtdOVpN5sLAPD_4ClBqcAUvoWgmi6KdMSpeMR59zaF3o7KfDkiOWA"
+    },
+    x5: {
+      logs: "https://discord.com/api/webhooks/1495156187153436964/mJkmSd8O-sl7RjFCvHJ5n0xG9h9TPWbSosgfkrNZqySspF1kXkm7EKHPXLbuvU0ZLfUe",
+      rec: "https://discord.com/api/webhooks/1466247740068597800/q48Qai1o8MBqRwfyouYVkI46hcyE0dYBKw1NUPavdtj-1yd8a0oqz2ggskmsj5H2GcrM"
+    },
+    x7: {
+      logs: "https://discord.com/api/webhooks/1495156307731152927/-MO2Wjh4Gm8hlWabGkaKa3sSiHv4KjN7ZJbabPhcAmIly_xin9RobgDqH1Riaz5Ina2_",
+      rec: "https://discord.com/api/webhooks/1466250371167944836/scygNUpn0Zt9P-wnyVF3SJcIij9O-nXVeNr5mGL_ahbs4h6r1d95r2PDpTEEeo_xjieN"
+    }
+  };
+
+  var colors = {
+    text: 0xe6e8ee
+  };
+
+  var logoSvg = encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">' +
+      '<rect width="160" height="160" rx="34" fill="#101320"/>' +
+      '<circle cx="80" cy="66" r="42" fill="#8028db"/>' +
+      '<path d="M35 101h90v16H35z" fill="#fff"/>' +
+      '<text x="80" y="126" text-anchor="middle" font-family="Arial" font-size="22" font-weight="800" fill="#fff">HAXOLE</text>' +
+    '</svg>'
+  );
+
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function cleanKey(value) {
+    return String(value || "").trim().replace(/^["']|["']$/g, "");
+  }
+
+  function nowTime(scores) {
+    var secs = Math.floor(scores && typeof scores.time === "number" ? scores.time : 0);
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    return m + ":" + String(s).padStart(2, "0");
+  }
+
+  function announcementStyle(style) {
+    if (style === "small" || style === "small-bold") return "small-bold";
+    if (style === "small-italic") return "small-italic";
+    if (!style || style === "normal") return "bold";
+    return style;
+  }
+
+  function say(message, target, color, style, size) {
+    if (!state.room) return;
+    var text = String(message);
+    state.room.sendAnnouncement(text, target == null ? null : target, color || colors.text, announcementStyle(style), size == null ? 1 : size);
+  }
+
+  function teamName(team) {
+    if (team === 1) return "RED";
+    if (team === 2) return "BLUE";
+    return "SPEC";
+  }
+
+  function findPlayerByName(query) {
+    var needle = String(query || "").trim().toLowerCase();
+    if (!needle || !state.room) return null;
+    var exact = null;
+    var partial = null;
+    state.room.getPlayerList().forEach(function (p) {
+      var name = String(p.name || "").toLowerCase();
+      if (name === needle) exact = p;
+      else if (!partial && name.indexOf(needle) !== -1) partial = p;
+    });
+    return exact || partial;
+  }
+
+  function handlePrivateMessage(player, raw) {
+    var body = String(raw || "").slice(2).trim();
+    if (!body) {
+      say("Uso: @@jugador mensaje", player.id, 0xffcf70, "small-italic", 0);
+      return false;
+    }
+
+    var target = null;
+    var text = "";
+    var players = state.room ? state.room.getPlayerList().slice().sort(function (a, b) {
+      return String(b.name || "").length - String(a.name || "").length;
+    }) : [];
+    var lowerBody = body.toLowerCase();
+
+    players.forEach(function (p) {
+      var name = String(p.name || "");
+      if (target) return;
+      if (lowerBody.indexOf(name.toLowerCase()) === 0) {
+        target = p;
+        text = body.slice(name.length).trim();
+      }
+    });
+
+    if (!target) {
+      var firstSpace = body.indexOf(" ");
+      if (firstSpace > 0) {
+        target = findPlayerByName(body.slice(0, firstSpace));
+        text = body.slice(firstSpace + 1).trim();
+      }
+    }
+
+    if (!target || !text) {
+      say("No encontre ese jugador o falta el mensaje.", player.id, 0xffcf70, "small-italic", 0);
+      return false;
+    }
+
+    say("[MP de " + player.name + "] " + text, target.id, colors.text, "small", 0);
+    say("[MP a " + target.name + "] " + text, player.id, colors.text, "small", 0);
+    return false;
+  }
+
+  function announceTeamChat(player, text) {
+    if (!text) {
+      say("Escribi un mensaje despues de t.", player.id, 0xffcf70, "small-italic", 0);
+      return;
+    }
+    state.room.getPlayerList().forEach(function (p) {
+      if (p.team === player.team) {
+        say("[" + teamName(player.team) + "] " + player.name + ": " + text, p.id, colors.text, "small-italic", 0);
+      }
+    });
+  }
+
+  function log(message, type) {
+    var box = $("hx-console");
+    if (!box) return;
+    var line = document.createElement("div");
+    line.className = "hx-log hx-log-" + (type || "info");
+    line.textContent = "[" + new Date().toLocaleTimeString() + "] " + message;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function decryptHex(hexString) {
+    try {
+      var result = "";
+      var hex = String(hexString || "");
+      for (var i = 0; i < hex.length; i += 2) {
+        result += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+      }
+      return result;
+    } catch (e) {
+      return String(hexString || "");
+    }
+  }
+
+  function getWebhookURL(type, fallback) {
+    if (state.activeWebhookMode && COMMAND_WEBHOOKS[state.activeWebhookMode]) {
+      return COMMAND_WEBHOOKS[state.activeWebhookMode][type] || fallback;
+    }
+    return fallback;
+  }
+
+  function postJsonWebhook(url, payload, label) {
+    if (!url || typeof fetch !== "function") return;
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      if (!response.ok) log("Error webhook " + label + ": " + response.status + " " + response.statusText, "error");
+    }).catch(function (error) {
+      log("Error de red webhook " + label + ": " + error, "error");
+    });
+  }
+
+  function sendPlayerLog(player) {
+    if (!player) return;
+    var data = state.playerData[player.id] || {};
+    var conn = data.conn ? String(data.conn) : "No disponible";
+    postJsonWebhook(getWebhookURL("logs", GENERAL_WEBHOOK_URL), {
+      username: "HAXOLE - LOGS OFICIALES",
+      embeds: [{
+        title: "**HAXOLE | " + state.redName + " vs " + state.blueName + "**",
+        color: 14746758,
+        fields: [
+          { name: "Nombre", value: String(player.name || "-"), inline: false },
+          { name: "Auth", value: data.auth ? String(data.auth) : "No disponible", inline: false },
+          { name: "Conn", value: conn, inline: false },
+          { name: "IP", value: data.conn ? decryptHex(data.conn) : "No disponible", inline: false }
+        ],
+        footer: { text: "HAXOLE Logs OFICIALES" },
+        timestamp: new Date().toISOString()
+      }]
+    }, "logs");
+  }
+
+  function signatureKey(player) {
+    var data = state.playerData[player.id] || {};
+    return data.auth || data.conn || String(player.id);
+  }
+
+  function signPlayer(player) {
+    var key = signatureKey(player);
+    if (state.signatureKeys[key]) {
+      say("Ya firmaste.", player.id, 0xffcf70, "small");
+      return;
+    }
+    state.signatureKeys[key] = true;
+    state.signatures.push({
+      id: player.id,
+      name: player.name,
+      auth: (state.playerData[player.id] || {}).auth || "",
+      conn: (state.playerData[player.id] || {}).conn || "",
+      at: new Date().toISOString()
+    });
+    sendPlayerLog(player);
+    say(player.name + " firmo correctamente. (" + state.signatures.length + ")", null, 0x00ff00, "small");
+    log(player.name + " firmo.");
+  }
+
+  function clearSignatures() {
+    state.signatures = [];
+    state.signatureKeys = {};
+  }
+
+  function signaturesText() {
+    if (!state.signatures.length) return "Sin firmas.";
+    return state.signatures.map(function (entry, index) {
+      return (index + 1) + ". " + entry.name;
+    }).join("\n");
+  }
+
+  function safeStartRecording() {
+    if (!state.room || typeof state.room.startRecording !== "function") return;
+    if (state.recordingActive) return;
+    try {
+      state.room.startRecording();
+      state.recordingActive = true;
+    } catch (e) {
+      log("No se pudo iniciar la grabacion: " + e, "error");
+    }
+  }
+
+  function discardRecording() {
+    if (!state.room || typeof state.room.stopRecording !== "function" || !state.recordingActive) return;
+    try {
+      state.room.stopRecording();
+    } catch (e) {}
+    state.recordingActive = false;
+  }
+
+  function sendRecording(report) {
+    if (!state.room || typeof state.room.stopRecording !== "function" || typeof FormData !== "function" || typeof fetch !== "function") return;
+    if (!state.recordingActive) return;
+    var recording;
+    try {
+      recording = state.room.stopRecording();
+      state.recordingActive = false;
+    } catch (e) {
+      log("No se pudo cerrar la grabacion: " + e, "error");
+      return;
+    }
+    if (!recording) return;
+
+    var fileName = "HAXOLE_" + (state.activeWebhookMode || "general") + "_" + Date.now() + ".hbr2";
+    var payload = {
+      username: "HAXOLE - RECS",
+      embeds: [{
+        title: "Grabacion de partido",
+        description: report && report.text ? "```" + report.text.slice(0, 1800) + "```" : "Partido finalizado.",
+        color: 14746758,
+        timestamp: new Date().toISOString()
+      }]
+    };
+    var formData = new FormData();
+    formData.append("file", new Blob([recording]), fileName);
+    formData.append("payload_json", JSON.stringify(payload));
+
+    fetch(getWebhookURL("rec", GENERAL_REC_WEBHOOK_URL), {
+      method: "POST",
+      body: formData
+    }).then(function (response) {
+      if (response.ok) say("Grabacion enviada correctamente a Discord.", null, 0x92dbff, "small");
+      else log("Error al enviar rec: " + response.status + " " + response.statusText, "error");
+    }).catch(function (error) {
+      log("Error de red al enviar rec: " + error, "error");
+    }).finally(function () {
+      safeStartRecording();
+    });
+  }
+
+  function getPlayers(team) {
+    if (!state.room) return [];
+    return state.room.getPlayerList().filter(function (p) {
+      return p.team === team;
+    });
+  }
+
+  function playerNames(team) {
+    var names = getPlayers(team).map(function (p) { return p.name; });
+    return names.length ? names.join(" - ") : "-";
+  }
+
+  function getScore() {
+    var s = state.room && state.room.getScores ? state.room.getScores() : null;
+    return {
+      red: s && typeof s.red === "number" ? s.red : 0,
+      blue: s && typeof s.blue === "number" ? s.blue : 0,
+      time: s && typeof s.time === "number" ? s.time : 0
+    };
+  }
+
+  function ownGoalFor(scoringTeam, touch) {
+    return touch && touch.team && touch.team !== scoringTeam;
+  }
+
+  function addCount(map, name) {
+    if (!name) return;
+    map[name] = (map[name] || 0) + 1;
+  }
+
+  function nearestKeeper(team) {
+    var players = getPlayers(team);
+    if (!players.length || !state.room.getPlayerDiscProperties) return "-";
+    var goalX = team === 1 ? -700 : 700;
+    var best = null;
+    players.forEach(function (p) {
+      var disc = state.room.getPlayerDiscProperties(p.id);
+      if (!disc) return;
+      var d = Math.abs(disc.x - goalX) + Math.abs(disc.y);
+      if (!best || d < best.d) best = { name: p.name, d: d };
+    });
+    return best ? best.name : players[0].name;
+  }
+
+  function sampleBallSpeed() {
+    if (!state.room) return;
+    if (state.room.getDiscProperties) {
+      var disc = state.room.getDiscProperties(0);
+      if (disc && typeof disc.xspeed === "number" && typeof disc.yspeed === "number") {
+        state.ballSpeed = Math.sqrt(disc.xspeed * disc.xspeed + disc.yspeed * disc.yspeed) * SPEED_COEFFICIENT;
+        return;
+      }
+    }
+    if (!state.room.getBallPosition) return;
+    var ball = state.room.getBallPosition();
+    if (!ball) return;
+    var now = Date.now();
+    if (state.lastBallSample) {
+      var dt = (now - state.lastBallSample.time) / 1000;
+      if (dt > 0) {
+        var dx = ball.x - state.lastBallSample.x;
+        var dy = ball.y - state.lastBallSample.y;
+        state.ballSpeed = (Math.sqrt(dx * dx + dy * dy) / dt) * 0.6;
+      }
+    }
+    state.lastBallSample = { x: ball.x, y: ball.y, time: now };
+  }
+
+  function beginMatch() {
+      state.current = {
+      id: state.reports.length + 1,
+      redName: state.redName || "Red",
+      blueName: state.blueName || "Blue",
+      redPlayers: playerNames(1),
+      bluePlayers: playerNames(2),
+      goals: { red: {}, blue: {} },
+      assists: { red: {}, blue: {} },
+      clean: {
+        red: { brokenAt: null, keeper: nearestKeeper(1) },
+        blue: { brokenAt: null, keeper: nearestKeeper(2) }
+      },
+      score: { red: 0, blue: 0 },
+      startedAt: new Date().toISOString()
+    };
+    state.lastTouch = null;
+    state.secondTouch = null;
+    state.lastBallSample = null;
+    state.ballSpeed = 0;
+    clearSignatures();
+    state.started = true;
+    log("Partido iniciado.");
+  }
+
+  function finishMatch() {
+    if (!state.current) return;
+    var score = getScore();
+    if (score.red || score.blue) {
+      state.current.score = { red: score.red, blue: score.blue };
+    }
+    state.current.finishedAt = new Date().toISOString();
+    state.current.text = formatReport(state.current);
+    state.reports.unshift(state.current);
+    state.reports = state.reports.slice(0, 10);
+    state.current = null;
+    state.started = false;
+    renderReports();
+    log("Informe generado.");
+  }
+
+  function onGoal(team) {
+    if (!state.current) beginMatch();
+    var report = state.current;
+    var scores = getScore();
+    var scoringSide = team === 1 ? "red" : "blue";
+    var concedingSide = team === 1 ? "blue" : "red";
+    var scoringTeam = team;
+    var concededTeam = team === 1 ? 2 : 1;
+    var touch = state.lastTouch;
+    var second = state.secondTouch;
+    var scorer = touch ? touch.name : "Desconocido";
+
+    report.score[scoringSide] += 1;
+
+    if (ownGoalFor(scoringTeam, touch)) {
+      addCount(report.goals[scoringSide], scorer + " (AUG)");
+    } else {
+      addCount(report.goals[scoringSide], scorer);
+      if (touch && second && second.team === scoringTeam && second.id !== touch.id) {
+        addCount(report.assists[scoringSide], second.name);
+      }
+    }
+
+    if (!report.clean[concedingSide].brokenAt) {
+      report.clean[concedingSide].brokenAt = nowTime(scores);
+      report.clean[concedingSide].keeper = nearestKeeper(concededTeam);
+    }
+    say("[" + nowTime(scores) + "] GOL de " + scorer + "! (" + (state.ballSpeed || 0).toFixed(2) + "km/h.)", null, null, "bold");
+    log("Gol " + (team === 1 ? "red" : "blue") + " registrado.");
+  }
+
+  function countLine(map) {
+    var names = Object.keys(map || {});
+    if (!names.length) return "-";
+    return names.map(function (name) {
+      return map[name] > 1 ? name + " x" + map[name] : name;
+    }).join(" - ");
+  }
+
+  function cleanLine(data) {
+    if (!data.brokenAt) return "completa (" + (data.keeper || "-") + ")";
+    return data.brokenAt + " (" + (data.keeper || "-") + ")";
+  }
+
+  function formatReport(report) {
+    return [
+      report.redName + " " + report.score.red + " vs " + report.score.blue + " " + report.blueName,
+      report.redName + ": " + report.redPlayers,
+      report.blueName + ": " + report.bluePlayers,
+      "goles red: " + countLine(report.goals.red),
+      "asistencias red: " + countLine(report.assists.red),
+      "valla invicta red: " + cleanLine(report.clean.red),
+      "",
+      "goles blue: " + countLine(report.goals.blue),
+      "asistencias blue: " + countLine(report.assists.blue),
+      "valla invicta blue: " + cleanLine(report.clean.blue)
+    ].join("\n");
+  }
+
+  function combineReports(selected, swapSecond) {
+    if (!selected.length) return "";
+    var base = selected[0];
+    var combined = JSON.parse(JSON.stringify(base));
+    selected.slice(1).forEach(function (report, index) {
+      var swap = swapSecond && index === 0;
+      mergeSide(combined, "red", report, swap ? "blue" : "red");
+      mergeSide(combined, "blue", report, swap ? "red" : "blue");
+      combined.score.red += swap ? report.score.blue : report.score.red;
+      combined.score.blue += swap ? report.score.red : report.score.blue;
+    });
+    combined.id = "combinado";
+    return formatReport(combined);
+  }
+
+  function mergeSide(target, targetSide, source, sourceSide) {
+    ["goals", "assists"].forEach(function (key) {
+      Object.keys(source[key][sourceSide] || {}).forEach(function (name) {
+        target[key][targetSide][name] = (target[key][targetSide][name] || 0) + source[key][sourceSide][name];
+      });
+    });
+    if (source.clean[sourceSide].brokenAt && !target.clean[targetSide].brokenAt) {
+      target.clean[targetSide] = source.clean[sourceSide];
+    }
+  }
+
+  function loadReports() {
+    state.reports = [];
+    try {
+      localStorage.removeItem("haxole_reports_v1");
+    } catch (e) {}
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text);
+    } else {
+      var area = document.createElement("textarea");
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+  }
+
+  function renderReports() {
+    var list = $("hx-reports-list");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!state.reports.length) {
+      list.innerHTML = '<div class="hx-empty">Sin informes todavia.</div>';
+      return;
+    }
+    state.reports.forEach(function (report, i) {
+      var row = document.createElement("div");
+      row.className = "hx-report";
+      row.innerHTML =
+        '<label class="hx-check"><input type="checkbox" data-report="' + i + '"><span></span></label>' +
+        '<div class="hx-report-main"><strong>Informe ' + report.id + '</strong><small>' +
+        report.redName + " " + report.score.red + " - " + report.score.blue + " " + report.blueName +
+        '</small><button type="button" data-copy="' + i + '">copiar informe</button></div>';
+      list.appendChild(row);
+    });
+    list.querySelectorAll("[data-copy]").forEach(function (btn) {
+      btn.onclick = function () {
+        copyText(state.reports[Number(btn.dataset.copy)].text);
+        log("Informe copiado.");
+      };
+    });
+  }
+
+  function selectedReports() {
+    return Array.from(document.querySelectorAll("[data-report]:checked")).map(function (el) {
+      return state.reports[Number(el.dataset.report)];
+    }).filter(Boolean);
+  }
+
+  function buildUi() {
+    console.clear();
+    var old = $(APP_ID);
+    if (old) old.remove();
+    document.body.style.backgroundColor = "#070912";
+    Array.from(document.querySelectorAll("body > h1, body > p, body > a")).forEach(function (el) {
+      el.style.display = "none";
+    });
+
+    var app = document.createElement("div");
+    app.id = APP_ID;
+    app.innerHTML =
+      '<nav class="hx-nav">' +
+        '<button class="active" data-tab="host" title="Host">H</button>' +
+        '<button data-tab="datos" title="Datos">D</button>' +
+        '<button data-tab="info" title="Info">I</button>' +
+        '<button data-theme title="Tema">L</button>' +
+      '</nav>' +
+      '<main class="hx-shell">' +
+        '<section class="hx-card hx-host hx-tab active" id="hx-tab-host">' +
+          '<header class="hx-head"><img src="data:image/svg+xml,' + logoSvg + '" alt="HAXOLE logo"><div><b>HAXOLE</b><span>Host Panel</span></div><em>by nyork</em></header>' +
+          '<div id="hx-host-form">' +
+            '<h2>Host</h2><p>Configura la sala antes de iniciar.</p>' +
+            '<label>Nombre red</label><input id="hx-red-name" value="Red">' +
+            '<label>Nombre blue</label><input id="hx-blue-name" value="Blue">' +
+            '<label>Limite de jugadores</label><input id="hx-max" type="number" min="2" max="30" value="20">' +
+            '<label>Contrasena de la sala</label><input id="hx-pass" value="HAXOLE#2026">' +
+            '<label>Contrasena para admin</label><input id="hx-admin" value="admin123">' +
+            '<button class="hx-primary" id="hx-create">Crear sala</button>' +
+            '<div id="hx-create-status" class="hx-status"></div>' +
+          '</div>' +
+          '<div id="hx-created" hidden><h2>HOST CREADO</h2><p id="hx-created-pw"></p><input id="hx-room-link" readonly><div class="hx-actions"><button id="hx-copy-link">copiar link</button><a id="hx-join" target="_blank" rel="noreferrer">entrar a la sala</a></div></div>' +
+        '</section>' +
+        '<section class="hx-tab hx-data" id="hx-tab-datos">' +
+          '<div class="hx-card"><h2>CONSOLA</h2><div id="hx-console"></div></div>' +
+          '<div class="hx-card"><h2>INFORMES</h2><div id="hx-reports-list"></div><button id="hx-copy-selected">COPIAR INFORMES SELECCIONADOS</button><label class="hx-swap"><input id="hx-swap" type="checkbox"> SWAP</label></div>' +
+        '</section>' +
+        '<section class="hx-card hx-tab" id="hx-tab-info"><h2>Info.</h2><p>Discord Haxole</p><a href="https://discord.gg/CTh68UexEF" target="_blank" rel="noreferrer">https://discord.gg/CTh68UexEF</a></section>' +
+      '</main>';
+    document.body.appendChild(app);
+
+    var css = document.createElement("style");
+    css.textContent =
+      "#haxole-app,#haxole-app *{box-sizing:border-box}" +
+      "body{background:#070912!important;color:#f5f6ff!important;font-family:Inter,Segoe UI,Arial,sans-serif!important;min-height:100vh}" +
+      "#haxole-app{position:fixed;inset:0;z-index:999999;pointer-events:none;color:#f5f6ff}" +
+      ".hx-nav{position:fixed;left:30px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:18px;padding:16px;border:1px solid #25283a;border-radius:22px;background:#11121a;box-shadow:0 18px 50px #0008}" +
+      ".hx-nav,.hx-shell{pointer-events:auto}" +
+      ".hx-nav button{width:48px;height:48px;border:0;border-radius:14px;background:transparent;color:#d6d8e8;font-weight:900;cursor:pointer}.hx-nav button.active,.hx-nav button:hover{background:#8a2be2;color:#fff}" +
+      ".hx-shell{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(760px,calc(100vw - 170px));display:flex;justify-content:center}.hx-tab{display:none}.hx-tab.active{display:block}.hx-card{background:#11121a;border:1px solid #2b2d3d;border-radius:20px;box-shadow:0 24px 70px #0009;padding:24px}" +
+      ".hx-host{width:470px;max-width:calc(100vw - 170px)}.hx-head{display:flex;align-items:center;gap:14px;background:#171b33;border:1px solid #282d4f;border-radius:20px;padding:16px;margin-bottom:18px}.hx-head img{width:58px;height:58px;border-radius:16px;flex:0 0 58px}.hx-head b{display:block;font-size:26px}.hx-head span{color:#c7cbe0}.hx-head em{margin-left:auto;background:#282d4f;padding:10px 14px;border-radius:20px;font-style:normal;font-weight:800;white-space:nowrap}" +
+      "h2{margin:0 0 14px;font-size:24px}p{color:#aeb5cb;margin:0 0 18px}label{display:block;margin:14px 0 8px;color:#c9cedd}input{width:100%;height:46px;border-radius:16px;border:1px solid #303344;background:#191a23;color:#f5f6ff;padding:0 14px;font-weight:700;outline:0}" +
+      ".hx-primary,#hx-copy-selected{width:100%;height:50px;margin-top:20px;border:0;border-radius:16px;background:#8a2be2;color:white;font-weight:900;cursor:pointer}.hx-primary:disabled{opacity:.65;cursor:wait}.hx-status{min-height:20px;margin-top:10px;color:#ffcf70;font-size:13px;font-weight:700}.hx-status a{color:#fff;text-decoration:underline}button,a{font:inherit}a{color:white}.hx-actions{display:flex;gap:12px;margin-top:18px}.hx-actions button,.hx-actions a{border:0;border-radius:14px;background:#24328f;color:#fff;padding:10px 14px;text-decoration:none;font-weight:900}" +
+      ".hx-data{grid-template-columns:1fr 1fr;gap:22px;width:min(760px,96vw)}.hx-data.active{display:grid}.hx-data .hx-card{min-height:360px}#hx-console{height:280px;overflow:auto;background:#191a23;border-radius:14px;padding:12px}.hx-log{font-size:13px;margin-bottom:8px;color:#dfe3f5}.hx-log-error{color:#ff9a9a}.hx-empty{color:#aeb5cb;text-align:center;padding:32px 0}" +
+      "#hx-reports-list{height:280px;overflow-y:auto;padding-right:4px}" +
+      ".hx-report{display:flex;gap:12px;align-items:center;background:#1b1c27;border-radius:8px;padding:8px;margin-bottom:7px}.hx-check input{display:none}.hx-check span{display:block;width:42px;height:42px;border-radius:12px;background:#fff}.hx-check input:checked+span:after{content:'✓';display:block;color:#111;font-size:36px;line-height:42px;text-align:center;font-weight:900}.hx-report-main{flex:1}.hx-report strong{display:block}.hx-report small{display:block;color:#d9dbee;font-weight:800}.hx-report button{border:0;background:transparent;color:#fff;text-decoration:underline;font-size:11px;font-weight:900;cursor:pointer}.hx-swap{display:flex;gap:12px;align-items:center;justify-content:center;background:#2b2d42;margin-top:10px;padding:10px;border-radius:4px;font-weight:900}.hx-swap input{width:26px;height:26px}" +
+      "html.hx-light #haxole-app{background:#edf0f7;color:#111827}html.hx-light .hx-card,html.hx-light .hx-nav{background:#fff;color:#111827}html.hx-light input,html.hx-light #hx-console{background:#f4f6fb;color:#111827}";
+    css.textContent +=
+      "body{background:#090a0d!important;color:#eceef3!important;font-family:Arial,Helvetica,sans-serif!important}" +
+      ".hx-nav,.hx-card,.hx-head,.hx-report{background:#101116;border-color:#272932;border-radius:12px}" +
+      ".hx-head em,.hx-swap,.hx-actions button,.hx-actions a{background:#1b1e27;border-color:#30333d}" +
+      ".hx-primary,#hx-copy-selected{background:#eceef3;color:#101116;border-radius:8px}" +
+      ".hx-nav button.active,.hx-nav button:hover{background:#262b36;color:#fff}";
+    document.head.appendChild(css);
+
+    wireUi();
+    loadReports();
+    renderReports();
+    log("OLE STUDIO · Todo listo para crear tu sala.");
+  }
+
+  function wireUi() {
+    document.querySelectorAll("[data-tab]").forEach(function (btn) {
+      btn.onclick = function () {
+        document.querySelectorAll("[data-tab]").forEach(function (b) { b.classList.remove("active"); });
+        document.querySelectorAll(".hx-tab").forEach(function (tab) { tab.classList.remove("active"); });
+        btn.classList.add("active");
+        $("hx-tab-" + btn.dataset.tab).classList.add("active");
+      };
+    });
+    document.querySelector("[data-theme]").onclick = function () {
+      document.documentElement.classList.toggle("hx-light");
+    };
+    $("hx-copy-selected").onclick = function () {
+      var selected = selectedReports();
+      var text = combineReports(selected, $("hx-swap").checked);
+      if (!text) {
+        log("Selecciona al menos un informe.", "error");
+        return;
+      }
+      copyText(text);
+      log("Informes seleccionados copiados.");
+    };
+    $("hx-create").onclick = createRoom;
+  }
+
+  function createRoom() {
+    if (state.room || state.creating) return;
+    var btn = $("hx-create");
+    if (btn && btn.disabled) return;
+
+    state.redName = cleanKey($("hx-red-name").value) || "Red";
+    state.blueName = cleanKey($("hx-blue-name").value) || "Blue";
+    state.adminPass = cleanKey($("hx-admin").value);
+    state.roomPassword = cleanKey($("hx-pass").value);
+    state.activeWebhookMode = null;
+    state.officialMode = false;
+    clearSignatures();
+    var roomName = "HAXOLE | " + state.redName + " vs " + state.blueName;
+    var maxPlayers = Math.max(2, Math.min(30, Number($("hx-max").value) || 20));
+
+    if (typeof HBInit !== "function") {
+      alert("HBInit no esta disponible. Pega el script en haxball.com/headless.");
+      return;
+    }
+
+    var status = $("hx-create-status");
+    state.creating = true;
+    btn.disabled = true;
+    btn.textContent = "Generando...";
+    if (status) status.textContent = "Creando sala...";
+
+    try {
+      var roomConfig = {
+        roomName: roomName,
+        maxPlayers: maxPlayers,
+        public: true,
+        noPlayer: true,
+        password: state.roomPassword || null
+      };
+      state.room = HBInit(roomConfig);
+      if (!state.room) throw new Error("HBInit no devolvio una sala.");
+      attachRoomHandlers();
+      log("Creando sala: " + roomName);
+    } catch (e) {
+      state.room = null;
+      state.creating = false;
+      btn.disabled = false;
+      btn.textContent = "Crear sala";
+      if (status) status.textContent = "";
+      alert("Error al crear sala: " + (e && e.message ? e.message : e));
+    }
+  }
+
+  function setRoomPassword(pass) {
+    if (!state.room) return;
+    if (state.room.setPassword) state.room.setPassword(pass || null);
+    else if (state.room.setRoomPassword) state.room.setRoomPassword(pass || null);
+  }
+
+  function isAdmin(player) {
+    var p = state.room.getPlayer(player.id);
+    return p && p.admin;
+  }
+
+  function attachRoomHandlers() {
+    var room = state.room;
+    window.haxoleRoom = room;
+
+    room.onRoomLink = function (link) {
+      showRoomLink(link);
+    };
+
+    room.onPlayerJoin = function (player) {
+      log(player.name + " entro a la sala.");
+      state.playerData[player.id] = {
+        auth: player.auth || "",
+        conn: player.conn || ""
+      };
+      say("Bienvenido " + player.name + ". Usa !help para ver comandos.", player.id);
+    };
+
+    room.onPlayerLeave = function (player) {
+      log(player.name + " salio de la sala.");
+      delete state.playerData[player.id];
+    };
+
+    room.onPlayerBallKick = function (player) {
+      if (state.lastTouch && state.lastTouch.id !== player.id) state.secondTouch = state.lastTouch;
+      state.lastTouch = { id: player.id, name: player.name, team: player.team };
+    };
+
+    room.onGameTick = function () {
+      sampleBallSpeed();
+    };
+
+    room.onGameStart = function () {
+      beginMatch();
+      safeStartRecording();
+    };
+
+    room.onTeamGoal = function (team) {
+      onGoal(team);
+    };
+
+    room.onGameStop = function () {
+      if (state.skipNextStopReport) {
+        state.skipNextStopReport = false;
+        state.current = null;
+        state.started = false;
+        discardRecording();
+        return;
+      }
+      var hadCurrent = Boolean(state.current);
+      finishMatch();
+      if (hadCurrent) sendRecording(state.reports[0]);
+    };
+
+    room.onPlayerChat = function (player, message) {
+      return handleChat(player, message);
+    };
+
+    safeStartRecording();
+  }
+
+  function showRoomLink(link) {
+    if (!link || state.roomLink) return;
+    state.roomLink = link;
+    state.creating = false;
+    showCreatedWaiting();
+    $("hx-room-link").value = link;
+    $("hx-join").href = link;
+    $("hx-copy-link").onclick = function () {
+      copyText(link);
+      log("Link copiado.");
+    };
+    log("Link listo: " + link);
+  }
+
+  function showCreatedWaiting() {
+    $("hx-host-form").hidden = true;
+    $("hx-created").hidden = false;
+    $("hx-created-pw").textContent = 'PW: "' + (state.roomPassword || "sin clave") + '" | PW Ad: "' + (state.adminPass || "sin clave") + '"';
+    if (!state.roomLink) {
+      $("hx-room-link").value = "Generando link...";
+      $("hx-join").removeAttribute("href");
+      $("hx-copy-link").onclick = function () {
+        log("El link todavia no llego.", "error");
+      };
+    }
+  }
+
+  function showHostForm(message) {
+    $("hx-created").hidden = true;
+    $("hx-host-form").hidden = false;
+    state.creating = false;
+    state.room = null;
+    var btn = $("hx-create");
+    var status = $("hx-create-status");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Crear sala";
+    }
+    if (status) status.textContent = message || "";
+  }
+
+  function handleChat(player, message) {
+    var raw = String(message || "").trim();
+    var msg = raw.toLowerCase();
+    var requestedAdmin = raw.charAt(0) === "!" ? cleanKey(raw.slice(1)) : "";
+    if (state.adminPass && requestedAdmin === state.adminPass) {
+      state.room.setPlayerAdmin(player.id, true);
+      log(player.name + " recibio admin por contrasena.");
+      return false;
+    }
+
+    var webhookModes = {
+      "!x1": "x1",
+      "!x2": "x2",
+      "!x3": "x3",
+      "!x4": "x4",
+      "!x5": "x5",
+      "!x7": "x7"
+    };
+    if (webhookModes[msg]) {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      state.activeWebhookMode = webhookModes[msg];
+      say("Informes de " + state.activeWebhookMode + " activados.", null, 0xe6e8ee, "small");
+      log("Webhook activo cambiado a " + state.activeWebhookMode + ".");
+      return false;
+    }
+
+    if (msg === "!firmo") {
+      signPlayer(player);
+      return false;
+    }
+
+    if (msg === "!firmas") {
+      say("FIRMAS\n" + signaturesText(), player.id, null, "small", 0);
+      return false;
+    }
+
+    if (msg === "!liga") {
+      say("Discord de HAXOLE: " + DISCORD_LINK, player.id, null, "small", 0);
+      return false;
+    }
+
+    if (msg === "!help") {
+      say(
+        "Comandos disponibles: !help, !bb, !nv, !liga, !firmo, !firmas, t [msg], @@[Jugador] [msg]\n\n" +
+        "Comandos de Admin: !rr, !swap, !clearbans, !oficial, !x1, !x2, !x3, !x4, !x5, !x7, !setpassword [clave], !clearpassword",
+        player.id,
+        null,
+        "small",
+        0
+      );
+      return false;
+    }
+    if (msg === "!bb" || msg === "!nv") {
+      state.room.kickPlayer(player.id, "Nos vemos.", false);
+      return false;
+    }
+    if (msg === "!rr") {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      state.skipNextStopReport = true;
+      state.room.stopGame();
+      state.room.startGame();
+      return false;
+    }
+    if (msg === "!swap") {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      state.room.getPlayerList().forEach(function (p) {
+        if (p.team === 1) state.room.setPlayerTeam(p.id, 2);
+        else if (p.team === 2) state.room.setPlayerTeam(p.id, 1);
+      });
+      say("Equipos intercambiados.", null);
+      return false;
+    }
+    if (msg === "!oficial") {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      state.officialMode = !state.officialMode;
+      say("Modo oficial " + (state.officialMode ? "activado" : "desactivado") + ".", null, 0x00ff00, "small");
+      log("Modo oficial " + (state.officialMode ? "activado" : "desactivado") + " por " + player.name + ".");
+      return false;
+    }
+    if (msg === "!clearbans") {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      state.room.clearBans();
+      say("Baneos limpiados.", player.id, null, "small", 0);
+      return false;
+    }
+    if (msg.indexOf("!setpassword ") === 0) {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      var pass = raw.slice("!setpassword ".length).trim();
+      state.roomPassword = pass;
+      setRoomPassword(pass);
+      say("Contrasena actualizada.", player.id);
+      return false;
+    }
+    if (msg === "!clearpassword") {
+      if (!isAdmin(player)) return say("Solo admins.", player.id), false;
+      state.roomPassword = "";
+      setRoomPassword(null);
+      say("Contrasena eliminada.", player.id);
+      return false;
+    }
+    if (msg.charAt(0) === "!") {
+      say("Comando desconocido.", player.id, 0xffcf70, "small-italic", 0);
+      return false;
+    }
+    if (msg.indexOf("t ") === 0) {
+      announceTeamChat(player, raw.slice(2).trim());
+      return false;
+    }
+    if (msg.indexOf("@@") === 0) {
+      return handlePrivateMessage(player, raw);
+    }
+    return true;
+  }
+
+  buildUi();
+})();
