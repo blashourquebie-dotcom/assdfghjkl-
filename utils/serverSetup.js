@@ -54,7 +54,7 @@ const maybePlaceBelow = async (guild, role, anchorRole) => {
   if (!guild || !role || !anchorRole) return false;
   const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
   if (!me?.permissions?.has(PermissionFlagsBits.ManageRoles)) return false;
-  if (role.position < anchorRole.position) return false;
+  if (role.position === anchorRole.position - 1) return false;
   try {
     await role.setPosition(Math.max(0, anchorRole.position - 1), { reason: "Ajuste automatico de jerarquia" });
     return true;

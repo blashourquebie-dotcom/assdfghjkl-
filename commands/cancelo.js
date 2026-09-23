@@ -225,7 +225,7 @@ module.exports = {
       }
 
       for (const mod of touchedModalities) {
-        void updateLinkedForumTemplates(interaction.guild, selectedClub.name, mod).catch(() => null);
+        await updateLinkedForumTemplates(interaction.guild, selectedClub.name, mod);
       }
 
       return interaction.editReply({

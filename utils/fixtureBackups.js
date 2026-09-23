@@ -3,13 +3,21 @@ const ADMIN = '1396189311455727636';
 
 function createFixtureBackupWorker(client, db = api) {
   let running = false;
+  let nextMissingTableProbe = 0;
   return async function processFixtureBackups() {
-    if (running || !db.isEnabled) return;
+    if (running || !db.isEnabled || Date.now() < nextMissingTableProbe) return;
     running = true;
     try {
       const before = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const pending = await db.selectRows('fixture_delete_requests', { select: 'id,discord_id,snapshot', or: `(status.eq.pending,and(status.eq.sending,updated_at.lt.${before}))`, order: 'created_at.asc', limit: 5 });
-      if (!pending.ok) return; // Migration may not have been installed yet.
+      if (!pending.ok) {
+        if (pending.status === 404) {
+          nextMissingTableProbe = Date.now() + 60 * 60 * 1000;
+          console.warn('Falta fixture_delete_requests en Supabase; se reintentará en una hora. Aplicá la migración de borrado de fixture si usás esa función.');
+        }
+        return;
+      }
+      nextMissingTableProbe = 0;
       for (const job of pending.data || []) {
         const claim = await db.request('rpc/claim_fixture_delete', { method: 'POST', body: { p_request: job.id } });
         if (!claim.ok || !claim.data) continue;

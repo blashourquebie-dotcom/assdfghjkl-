@@ -10,7 +10,9 @@ const {
   removeForumClubLinkByChannel,
   restoreDeletedForumTemplate,
   auditLinkedForumTemplates,
-  reconcileClubRosterFromRoles
+  reconcileClubRosterFromRoles,
+  ensureGuildMembersLoaded,
+  syncMemberClubRoles
 } = require("./utils/plantillas");
 const { handleMessage: handleAntiDfMessage } = require("./utils/antiDf");
 const { processExpiredSanctions } = require("./utils/sanctions");
@@ -96,6 +98,7 @@ process.on("unhandledRejection", (reason) => {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
   ],
@@ -139,9 +142,7 @@ client.on("messageCreate", async (message) => {
   });
 });
 
-const auditAllGuildTemplates = async () => {
-  for (const guild of client.guilds.cache.values()) {
-    if (!require('./utils/tournamentScope').allowedGuild(guild.id)) continue;
+const auditGuildTemplates = async (guild) => {
     await withGuild(guild.id, async () => {
     const removed = await pruneMissingForumClubLinks(guild).catch((error) => {
       console.error(`Error limpiando foros vinculados en ${guild.name}:`, error);
@@ -157,7 +158,6 @@ const auditAllGuildTemplates = async () => {
       console.log(`[${guild.name}] Plantillas auditadas: ${audit.checked}, reparadas: ${audit.repaired}, removidas: ${audit.removed}, omitidas: ${audit.skipped}`);
     }
     });
-  }
 };
 
 const pruneAllGuildTransferMessages = async () => {
@@ -167,12 +167,10 @@ const pruneAllGuildTransferMessages = async () => {
   }
 };
 
-const reconcileAllGuildRosters = async () => {
-  for (const guild of client.guilds.cache.values()) {
-    if (!require('./utils/tournamentScope').allowedGuild(guild.id)) continue;
+const reconcileGuildRoster = async (guild) => {
     await withGuild(guild.id, async () => {
       const cfg = readConfig();
-      await guild.members.fetch({ force: true }).catch(() => null);
+      await ensureGuildMembersLoaded(guild);
       let added = 0;
       let removed = 0;
       let checked = 0;
@@ -182,7 +180,7 @@ const reconcileAllGuildRosters = async () => {
         for (const modality of Object.keys(clubEntry?.roles || {})) {
           const mod = roleRegistry.normalizeModality(modality);
           if (!mod) continue;
-          const result = await reconcileClubRosterFromRoles(guild, clubs.findClub(clubName) || clubEntry, mod).catch(() => null);
+          const result = await reconcileClubRosterFromRoles(guild, clubs.findClub(clubName) || clubEntry, mod);
           if (!result) continue;
           checked += 1;
           added += result.added;
@@ -194,7 +192,6 @@ const reconcileAllGuildRosters = async () => {
         console.log(`[${guild.name}] Plantillas sincronizadas con roles: ${checked}, agregados: ${added}, fantasmas removidos: ${removed}`);
       }
     });
-  }
 };
 
 // Validar variables de entorno
@@ -226,26 +223,45 @@ const startBot = async () => {
     void processFixtureBackups().catch(error => console.error("Fixture backup:", error.message));
     setInterval(() => { void processFixtureBackups().catch(error => console.error("Fixture backup:", error.message)); }, 15000);
     await commandHandler(client);
-    await auditAllGuildTemplates();
-
     await pruneAllGuildTransferMessages();
-    await reconcileAllGuildRosters();
+    const pendingRosterGuilds = new Set(client.guilds.cache.filter(guild => require('./utils/tournamentScope').allowedGuild(guild.id)).keys());
+    const bootstrapRosters = async () => {
+      for (const guildId of pendingRosterGuilds) {
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) { pendingRosterGuilds.delete(guildId); continue; }
+        try {
+          await ensureGuildMembersLoaded(guild);
+          await reconcileGuildRoster(guild);
+          await auditGuildTemplates(guild);
+          pendingRosterGuilds.delete(guildId);
+        } catch (error) {
+          console.error(`[${guild.name}] No pude cargar la lista completa de miembros. No modificaré plantillas desde una lista incompleta:`, error?.message || error);
+        }
+      }
+    };
+    await bootstrapRosters();
     await processExpiredSanctions(client).catch((error) => console.error("Error limpiando sanciones:", error));
     setInterval(() => {
       pruneAllGuildTransferMessages().catch((error) => console.error("Error limpiando traspasos vencidos:", error));
       processExpiredSanctions(client).catch((error) => console.error("Error limpiando sanciones:", error));
     }, 60 * 60 * 1000);
-    setInterval(() => {
-      reconcileAllGuildRosters().catch((error) => console.error("Error sincronizando plantillas con roles:", error));
-    }, 15 * 60 * 1000);
-    setInterval(() => {
-      auditAllGuildTemplates().catch((error) => console.error("Error en auditoria periodica de plantillas:", error));
-    }, 2 * 60 * 1000);
+    if (pendingRosterGuilds.size) setInterval(() => { if (pendingRosterGuilds.size) void bootstrapRosters(); }, 15 * 60 * 1000);
   });
 
   interactionHandler(client);
   prefixHandler(client);
   webhookHandler(client);
+  client.on('guildMemberUpdate', (before, after) => {
+    if (!require('./utils/tournamentScope').allowedGuild(after.guild.id)) return;
+    const previous = [...before.roles.cache.keys()];
+    void withGuild(after.guild.id, () => syncMemberClubRoles(after.guild, after, previous))
+      .catch(error => console.error('Cambio de roles:', error));
+  });
+  client.on('guildMemberRemove', member => {
+    if (!require('./utils/tournamentScope').allowedGuild(member.guild.id)) return;
+    void withGuild(member.guild.id, () => syncMemberClubRoles(member.guild, { id: member.id, roles: { cache: new Map() } }, [...member.roles.cache.keys()]))
+      .catch(error => console.error('Salida de jugador:', error));
+  });
   require("./handlers/reportApprovalHandler")(client);
   client.on("guildCreate", async guild => {
     if (!require('./utils/tournamentScope').allowedGuild(guild.id)) {
@@ -253,6 +269,13 @@ const startBot = async () => {
       return;
     }
     await commandHandler(client);
+    try {
+      await ensureGuildMembersLoaded(guild);
+      await reconcileGuildRoster(guild);
+      await auditGuildTemplates(guild);
+    } catch (error) {
+      console.error(`[${guild.name}] No se pudo sincronizar la plantilla al entrar:`, error?.message || error);
+    }
   });
 
   client.on("channelDelete", (channel) => {

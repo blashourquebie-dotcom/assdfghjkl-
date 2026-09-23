@@ -4,7 +4,7 @@ const clubs = require("../utils/clubs");
 const validators = require("../utils/validators");
 const nicknames = require("../utils/nicknames");
 const roleRegistry = require("../utils/roleRegistry");
-const { updateLinkedForumTemplates } = require("../utils/plantillas");
+const { updateLinkedForumTemplates, ensureGuildMembersLoaded } = require("../utils/plantillas");
 const { sendAlert, sendCapActionAlert } = require("../utils/alerts");
 const market = require("../utils/market");
 const { sendTempInteractionReply } = require("../utils/tempMessage");
@@ -115,8 +115,13 @@ module.exports = {
       .length;
     const roleLimit = validators.getRoleLimit(roleId, modality);
     if (roleLimit && newSigningCount > 0) {
+      try { await ensureGuildMembersLoaded(interaction.guild); }
+      catch (error) {
+        return interaction.editReply({ content: 'No pude consultar la lista completa del rol. Revisá el intent de miembros de Discord y volvé a intentar.' });
+      }
       const role = await interaction.guild.roles.fetch(roleId).catch(() => null);
-      const currentCount = role?.members?.size ?? 0;
+      if (!role) return interaction.editReply({ content: 'No pude consultar el rol del club. Volvé a intentar.' });
+      const currentCount = role.members.size;
       if (currentCount + newSigningCount > roleLimit) {
         return sendTempInteractionReply(interaction, {
           content: [
@@ -237,14 +242,14 @@ module.exports = {
         }).catch(() => null);
       }
 
+    for (const mod of touchedModalities) {
+      await updateLinkedForumTemplates(interaction.guild, clubEntry.name, mod);
+    }
+
       const response = await sendTempInteractionReply(interaction, {
         content: [`**Fichaje en ${clubEntry.name} ${modality}**`, lines.join("\n")].join("\n"),
       flags: 64
     }, TEMP_REPLY_MS);
-
-    for (const mod of touchedModalities) {
-      void updateLinkedForumTemplates(interaction.guild, clubEntry.name, mod).catch(() => null);
-    }
 
     return response;
   }

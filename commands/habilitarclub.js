@@ -87,6 +87,16 @@ module.exports = {
         return interaction.reply({ content: `Estas modalidades no estan habilitadas globalmente: ${disabled.join(", ")}`, flags: 64 });
       }
 
+      const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
+      if (!botMember?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+        return interaction.reply({ content: 'El bot necesita Administrar roles para habilitar el club y ordenar sus roles.', flags: 64 });
+      }
+      for (const mod of modalidades) {
+        const playerRoleId = roleRegistry.getGeneralRole(cfg, interaction.guild.id, mod, 'player')?.roleId;
+        const playerRole = playerRoleId && (interaction.guild.roles.cache.get(playerRoleId) || await interaction.guild.roles.fetch(playerRoleId).catch(() => null));
+        if (!playerRole) return interaction.reply({ content: `Falta el rol jugador de ${mod}. Configurá los roles de la modalidad antes de habilitar el club.`, flags: 64 });
+      }
+
       let logoUrl = imagen?.url || null;
       let createdEmoji = null;
       let emojiWarning = null;
@@ -145,13 +155,13 @@ module.exports = {
         }
         saveConfig(cfgClub);
 
-        if (readConfig().automation?.clubRolesBelowPlayer !== false) {
-          const playerRole = roleRegistry.getGeneralRole(cfgClub, gid, mod, "player");
-          const anchorRole = playerRole?.roleId
-            ? interaction.guild.roles.cache.get(playerRole.roleId) || await interaction.guild.roles.fetch(playerRole.roleId).catch(() => null)
-            : null;
-          await maybePlaceBelow(interaction.guild, role, anchorRole).catch(() => null);
-        }
+        const playerRole = roleRegistry.getGeneralRole(cfgClub, gid, mod, "player");
+        const anchorRole = playerRole?.roleId
+          ? interaction.guild.roles.cache.get(playerRole.roleId) || await interaction.guild.roles.fetch(playerRole.roleId).catch(() => null)
+          : null;
+        if (!anchorRole) throw new Error(`Falta el rol jugador de ${mod}; no se pudo ubicar ${nombre} ${mod}`);
+        const positioned = await maybePlaceBelow(interaction.guild, role, anchorRole);
+        if (!positioned && role.position >= anchorRole.position) throw new Error(`No se pudo ubicar ${nombre} ${mod} debajo de jugador ${mod}`);
 
         createdRoles.push(`${nombre} ${mod}`);
         roleIdsByMod[mod] = role.id;

@@ -9,3 +9,15 @@ test('DM delivered before completion; a rejected DM never calls delete',async()=
   else assert.ok(calls.indexOf('DM')<calls.indexOf('rpc/complete_fixture_delete'));
  }
 });
+
+test('un 404 de la tabla faltante no consulta Supabase cada quince segundos',async()=>{
+ let calls=0;
+ const db={isEnabled:true,selectRows:async()=>{calls++;return {ok:false,status:404};}};
+ const warn=console.warn;
+ console.warn=()=>{};
+ try{
+  const worker=createFixtureBackupWorker({},db);
+  await worker();await worker();
+  assert.equal(calls,1);
+ }finally{console.warn=warn;}
+});

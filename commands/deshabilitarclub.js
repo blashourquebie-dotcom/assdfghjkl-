@@ -234,7 +234,19 @@ const executeDisableClub = async (interaction) => {
 
     const remainingRoles = Object.keys(clubCfg.roles || {});
     const removedEverything = remainingRoles.length === 0;
+    let emojiStatus = "se conserva";
     if (removedEverything) {
+      const emojiId = String(clubCfg.emoji || '').match(/<a?:[^:>]+:(\d{15,25})>/)?.[1];
+      const shared = emojiId && Object.entries(cfg.clubs || {}).some(([name, entry]) =>
+        name !== clubEntry.name && String(entry?.emoji || '').includes(`:${emojiId}>`));
+      if (emojiId && !shared) {
+        const emoji = interaction.guild.emojis.cache.get(emojiId) || await interaction.guild.emojis.fetch(emojiId).catch(() => null);
+        if (emoji) {
+          try { await emoji.delete(`Club ${clubEntry.name} deshabilitado en todas las modalidades`); emojiStatus = "eliminado"; }
+          catch (error) { emojiStatus = "error al eliminar"; console.error(`[deshabilitarclub] No se pudo eliminar el emoji de ${clubEntry.name}:`, error); }
+        }
+        else emojiStatus = "ya no existe";
+      }
       cfg.archivedClubs[clubEntry.name] = {
         ...cfg.archivedClubs[clubEntry.name],
         ...clubEntry,
@@ -242,6 +254,7 @@ const executeDisableClub = async (interaction) => {
         disabledAt: new Date().toISOString(),
         disabledBy: interaction.user.tag
       };
+      if (emojiStatus === "eliminado" || emojiStatus === "ya no existe") cfg.archivedClubs[clubEntry.name].emoji = null;
       delete cfg.clubs[clubEntry.name];
     } else {
       cfg.clubs[clubEntry.name] = clubCfg;
@@ -269,6 +282,7 @@ const executeDisableClub = async (interaction) => {
         { name: "Roles jugador quitados", value: String(playerRolesRemoved), inline: true },
         { name: "Foros desvinculados", value: String(unlinkedForums.length), inline: true },
         { name: "Club completo", value: removedEverything ? "si" : "no", inline: true }
+        ,{ name: "Emoji del servidor", value: emojiStatus, inline: true }
       )
       .setColor(0xe74c3c);
 

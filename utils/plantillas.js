@@ -1,8 +1,21 @@
-const { readConfig, readUsers, saveConfig, saveUsers } = require("./database");
+const { readConfig, readUsers, saveConfig, saveUsers, withGuild } = require("./database");
 const clubs = require("./clubs");
 const roleRegistry = require("./roleRegistry");
 const validators = require("./validators");
 const haxoleSupabase = require("./haxoleSupabase");
+const loadedGuilds = new WeakSet();
+const memberLoads = new WeakMap();
+
+const ensureGuildMembersLoaded = async (guild) => {
+  if (loadedGuilds.has(guild)) return true;
+  if (!memberLoads.has(guild)) {
+    const loading = guild.members.fetch({ force: true, time: 30000 })
+      .then(() => { loadedGuilds.add(guild); return true; })
+      .finally(() => memberLoads.delete(guild));
+    memberLoads.set(guild, loading);
+  }
+  return memberLoads.get(guild);
+};
 
 const DEFAULT_CLUB_EMOJI = "<:HaxOle:1495228748851839240>";
 const CAPTAIN_EMOJI = "<:CAPITAN:1446933863795392674>";
@@ -17,6 +30,14 @@ const TEMPLATE_FOOTER = [
 const linkBelongsToGuild = (link, guild) => {
   if (!link?.guildId || !guild?.id) return true;
   return String(link.guildId) === String(guild.id);
+};
+
+const fetchLinkedChannel = async (guild, channelId) => {
+  try { return { channel: await guild.channels.fetch(channelId), missing: true }; }
+  catch (error) {
+    if (error?.code === 10003 || error?.status === 404) return { channel: null, missing: true };
+    return { channel: null, missing: false };
+  }
 };
 
 const getUserCountryEmoji = (userData) => {
@@ -45,25 +66,15 @@ const formatSignedAt = (isoDate) => {
 const fetchMembersForTemplate = async (guild, clubEntry, modality) => {
   const roleId = clubs.getRoleForClub(clubEntry, modality);
   if (!roleId) return { roleId: null, members: [] };
+  await ensureGuildMembersLoaded(guild);
 
   const users = readUsers(guild.id);
   const captainId = clubEntry.captains?.[modality] || null;
   const subcaptainId = clubEntry.subcaptains?.general || clubEntry.subcaptains?.[modality] || null;
 
-  const fittedIds = Object.entries(users)
-    .filter(([, userData]) => userData?.clubRoles?.[modality] === roleId)
-    .map(([userId]) => userId);
-
-  for (const id of [captainId, subcaptainId]) {
-    const affiliationRole = users[id]?.clubRoles?.[modality];
-    if (id && affiliationRole === roleId && !fittedIds.includes(id)) fittedIds.push(id);
-  }
-
-  const members = [];
-  for (const userId of fittedIds) {
-    const member = await guild.members.fetch(userId).catch(() => null);
-    if (member && member.roles.cache.has(roleId)) members.push(member);
-  }
+  const role = guild.roles.cache.get(roleId) || await guild.roles.fetch(roleId);
+  if (!role) throw new Error(`No se pudo consultar el rol ${roleId}`);
+  const members = Array.from(role.members.values());
 
   return {
     roleId,
@@ -80,9 +91,11 @@ const reconcileClubRosterFromRoles = async (guild, clubEntry, modality) => {
   if (!guild || !clubEntry || !mod || !roleId) {
     return { roleId, added: 0, removed: 0, roleCount: 0, dbCountBefore: 0, dbCountAfter: 0 };
   }
+  await ensureGuildMembersLoaded(guild);
 
-  const role = await guild.roles.fetch(roleId).catch(() => null);
-  const roleMemberIds = new Set(Array.from(role?.members?.keys?.() || []));
+  const role = guild.roles.cache.get(roleId) || await guild.roles.fetch(roleId).catch(() => null);
+  if (!role) throw new Error(`No se pudo consultar el rol ${roleId}`);
+  const roleMemberIds = new Set(Array.from(role.members.keys()));
 
   const users = readUsers(guild.id);
   const dbIdsBefore = Object.entries(users)
@@ -183,6 +196,73 @@ const reconcileClubRosterFromRoles = async (guild, clubEntry, modality) => {
   };
 };
 
+const pendingTemplateRefreshes = new Map();
+const scheduleTemplateRefresh = (guild, clubName, modality) => {
+  const key = `${guild.id}:${clubName}:${modality}`;
+  if (pendingTemplateRefreshes.has(key)) return;
+  const timer = setTimeout(() => {
+    pendingTemplateRefreshes.delete(key);
+    void withGuild(guild.id, () => updateLinkedForumTemplates(guild, clubName, modality))
+      .catch((error) => console.error(`Plantilla ${clubName} ${modality}:`, error));
+  }, 400);
+  pendingTemplateRefreshes.set(key, timer);
+};
+
+const syncMemberClubRoles = async (guild, member, previousRoleIds = []) => {
+  const cfg = readConfig();
+  const oldRoles = new Set(previousRoleIds);
+  const currentRoles = new Set(member?.roles?.cache?.keys?.() || []);
+  const changed = [];
+  for (const [clubName, club] of Object.entries(cfg.clubs || {})) {
+    for (const [rawMod, roleId] of Object.entries(club.roles || {})) {
+      const modality = roleRegistry.normalizeModality(rawMod);
+      if (!modality || oldRoles.has(roleId) === currentRoles.has(roleId)) continue;
+      changed.push({ clubName, club, modality, roleId });
+    }
+  }
+  if (!changed.length) return 0;
+
+  const users = readUsers(guild.id);
+  const userId = member?.id || member?.user?.id;
+  if (!userId) return 0;
+  const user = users[userId] || { id: userId, joinDate: new Date().toISOString(), clubRoles: {}, clubAffiliations: {}, sanctions: [], history: [] };
+  user.clubRoles ||= {};
+  user.clubAffiliations ||= {};
+  let modified = false;
+  for (const modality of new Set(changed.map(entry => entry.modality))) {
+    const current = Object.entries(cfg.clubs || {}).flatMap(([clubName, club]) =>
+      Object.entries(club.roles || {}).filter(([rawMod, roleId]) => roleRegistry.normalizeModality(rawMod) === modality && currentRoles.has(roleId))
+        .map(([, roleId]) => ({ clubName, club, roleId })));
+    const selected = current.find(entry => entry.roleId === user.clubRoles[modality]) || current[0];
+    if (selected) {
+      if (user.clubRoles[modality] !== selected.roleId) { user.clubRoles[modality] = selected.roleId; modified = true; }
+      for (const [name, entry] of Object.entries(user.clubAffiliations)) {
+        if (name === selected.clubName || !entry?.modalities?.[modality]) continue;
+        delete entry.modalities[modality];
+        if (!Object.keys(entry.modalities).length) delete user.clubAffiliations[name];
+        modified = true;
+      }
+      const affiliation = user.clubAffiliations[selected.clubName] ||= { abbr: selected.club.abbr || null, modalities: {} };
+      affiliation.modalities ||= {};
+      if (affiliation.modalities[modality]?.roleId !== selected.roleId) {
+        affiliation.modalities[modality] = { roleId: selected.roleId, signedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), by: 'discord-role' };
+        modified = true;
+      }
+    } else {
+      if (user.clubRoles[modality]) { delete user.clubRoles[modality]; modified = true; }
+      for (const [name, entry] of Object.entries(user.clubAffiliations)) {
+        if (!entry?.modalities?.[modality]) continue;
+        delete entry.modalities[modality];
+        if (!Object.keys(entry.modalities).length) delete user.clubAffiliations[name];
+        modified = true;
+      }
+    }
+  }
+  if (modified) { users[userId] = user; saveUsers(users); }
+  for (const entry of changed) scheduleTemplateRefresh(guild, entry.clubName, entry.modality);
+  return changed.length;
+};
+
 const renderClubTemplate = async (guild, clubEntry, modality, options = {}) => {
   const mod = roleRegistry.normalizeModality(modality);
   const { roleId, users, captainId, subcaptainId, members } = await fetchMembersForTemplate(guild, clubEntry, mod);
@@ -279,10 +359,11 @@ const reconcileForumTemplate = async (guild, channel, clubEntry, modality, optio
 
   if (!message) return null;
 
-  await message.edit({ content }).catch(() => null);
+  if (message.content !== content) await message.edit({ content });
 
   const cfg = readConfig();
   if (!cfg.forumClubs) cfg.forumClubs = {};
+  const previous = cfg.forumClubs[channel.id] || {};
   cfg.forumClubs[channel.id] = {
     ...(cfg.forumClubs[channel.id] || {}),
     guildId: guild.id,
@@ -291,9 +372,9 @@ const reconcileForumTemplate = async (guild, channel, clubEntry, modality, optio
     club: clubEntry.name,
     modality: mod,
     messageId: message.id,
-    updatedAt: new Date().toISOString()
+    updatedAt: previous.messageId === message.id ? previous.updatedAt : new Date().toISOString()
   };
-  saveConfig(cfg);
+  if (previous.messageId !== message.id || previous.club !== clubEntry.name || previous.modality !== mod) saveConfig(cfg);
 
   return message;
 };
@@ -316,9 +397,9 @@ const updateLinkedForumTemplates = async (guild, clubName, modality, options = {
     if (options.syncRoster) {
       await reconcileClubRosterFromRoles(guild, clubEntry, link.modality).catch(() => null);
     }
-    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    const { channel, missing } = await fetchLinkedChannel(guild, channelId);
     if (!channel) {
-      removeForumClubLinkByChannel(channelId);
+      if (missing) removeForumClubLinkByChannel(channelId);
       continue;
     }
     if (!channel.messages?.fetch) continue;
@@ -385,9 +466,10 @@ const pruneMissingForumClubLinks = async (guild) => {
   for (const [channelId, link] of Object.entries(cfg.forumClubs || {})) {
     if (!linkBelongsToGuild(link, guild)) continue;
 
-    const channel = await guild.channels.fetch(channelId).catch(() => null);
-    const parent = link.parentId ? await guild.channels.fetch(link.parentId).catch(() => null) : true;
-    if (channel && parent) continue;
+    const channel = await fetchLinkedChannel(guild, channelId);
+    const parent = link.parentId ? await fetchLinkedChannel(guild, link.parentId) : { channel: true, missing: false };
+    if (channel.channel && parent.channel) continue;
+    if ((!channel.channel && !channel.missing) || (!parent.channel && !parent.missing)) continue;
     removed.push({ channelId, link });
     delete cfg.forumClubs[channelId];
   }
@@ -411,8 +493,9 @@ const auditLinkedForumTemplates = async (guild) => {
 
     results.checked += 1;
 
-    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    const { channel, missing } = await fetchLinkedChannel(guild, channelId);
     if (!channel?.messages?.fetch) {
+      if (!missing) { results.skipped += 1; continue; }
       const latest = readConfig();
       if (latest.forumClubs?.[channelId]) {
         delete latest.forumClubs[channelId];
@@ -494,5 +577,7 @@ module.exports = {
   pruneMissingForumClubLinks,
   auditLinkedForumTemplates,
   restoreDeletedForumTemplate,
-  reconcileClubRosterFromRoles
+  reconcileClubRosterFromRoles,
+  ensureGuildMembersLoaded,
+  syncMemberClubRoles
 };

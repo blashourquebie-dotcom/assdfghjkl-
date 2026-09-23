@@ -52,6 +52,7 @@ const cache = {
   bootstrapping: null,
   docs: { ...DEFAULT_DOCS }
 };
+const pendingWrites = new Map();
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -142,6 +143,42 @@ const persistDoc = async (name) => {
   return Boolean(result?.ok);
 };
 
+const schedulePersist = (name) => {
+  if (!supabaseClient.isEnabled) return;
+  const state = pendingWrites.get(name) || { dirty: false, running: false, timer: null };
+  state.dirty = true;
+  pendingWrites.set(name, state);
+  if (state.timer || state.running) return;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    void flushPersist(name);
+  }, 250);
+};
+
+const flushPersist = async (name) => {
+  const state = pendingWrites.get(name);
+  if (!state || state.running) return;
+  state.running = true;
+  try {
+    while (state.dirty) {
+      state.dirty = false;
+      const snapshot = deepClone(cache.docs[name]);
+      const result = await supabaseClient.upsertRows(STATE_DOCS_TABLE, [{ name, data: snapshot }], "name");
+      if (!result?.ok) {
+        console.error(`No se pudo guardar el estado ${name} en Supabase:`, result?.status || result?.error || 'sin respuesta');
+        state.dirty = true;
+        break;
+      }
+    }
+  } catch (error) {
+    console.error(`No se pudo guardar el estado ${name} en Supabase:`, error?.message || error);
+    state.dirty = true;
+  } finally {
+    state.running = false;
+    if (state.dirty && !state.timer) state.timer = setTimeout(() => { state.timer = null; void flushPersist(name); }, 5000);
+  }
+};
+
 const bootstrap = async () => {
   if (cache.ready) return cache.docs;
   if (cache.bootstrapping) return cache.bootstrapping;
@@ -184,7 +221,7 @@ const getDoc = (name) => normalizeDoc(name, cache.docs[name] ?? DEFAULT_DOCS[nam
 
 const setDoc = (name, data) => {
   cache.docs[name] = normalizeDoc(name, data);
-  void persistDoc(name);
+  schedulePersist(name);
   return cache.docs[name];
 };
 
