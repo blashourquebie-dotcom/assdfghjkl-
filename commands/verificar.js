@@ -1,10 +1,12 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require("discord.js");
-const { readConfig, readUsers, saveConfig, upsertUserClubAffiliation } = require("../utils/database");
+const { readConfig, readUsers, saveConfig, upsertUserClubAffiliation, removeUserClubAffiliation, addHistory, getUser } = require("../utils/database");
 const roleRegistry = require("../utils/roleRegistry");
 const nicknames = require("../utils/nicknames");
 const clubs = require("../utils/clubs");
 const divisions = require("../utils/divisions");
 const { updateLinkedForumTemplates } = require("../utils/plantillas");
+const haxoleSupabase = require("../utils/haxoleSupabase");
+const { latestExcessSignings, subcaptainTime } = require("../utils/rosterLimitPlan");
 
 const MAX_DETAILS = 12;
 
@@ -51,7 +53,7 @@ module.exports = {
   data: new SlashCommandBuilder().setName("verificar").setDescription("Abre el menú de verificaciones").setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     if (!interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: "Solo administradores.", flags: 64 });
-    return interaction.reply({ flags: 64, embeds: [new EmbedBuilder().setColor(0x151821).setTitle("Verificar servidor").setDescription("**Roles:** revisa roles generales y retira los que no correspondan.\n**Clubes:** sincroniza roles, fichajes y apodos de los clubes.")], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`verificar:${interaction.user.id}`).setPlaceholder("Elegí qué verificar").addOptions({ label: "Roles generales", value: "roles" }, { label: "Clubes", value: "club" }))] });
+    return interaction.reply({ flags: 64, embeds: [new EmbedBuilder().setColor(0x151821).setTitle("Verificar servidor").setDescription("**Roles:** revisa roles generales.\n**Clubes:** sincroniza fichajes y apodos.\n**Limites:** corrige plantillas y subcapitanes excedidos.")], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`verificar:${interaction.user.id}`).setPlaceholder("Elegí qué verificar").addOptions({ label: "Roles generales", value: "roles" }, { label: "Clubes", value: "club" }, { label: "Limites de jugadores y SC", value: "limits" }))] });
   },
   async handleSelect(interaction, [owner]) {
     if (owner !== interaction.user.id || !interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: "Solo el administrador que abrió este menú.", flags: 64 });
@@ -62,6 +64,7 @@ module.exports = {
     context.editReply = interaction.editReply.bind(interaction);
     if (interaction.values[0] === "roles") return verifyGeneralRoles(context);
     if (interaction.values[0] === "club") return verifyClub(context);
+    if (interaction.values[0] === "limits") return verifyRosterLimits(context);
   },
 
   autocomplete: async (interaction) => {
@@ -418,4 +421,172 @@ async function verifyClub(interaction) {
     .setColor(errors.length ? 0xf1c40f : 0x2ecc71);
 
   return interaction.editReply({ embeds: [embed] });
+}
+
+const staffStillAssigned = (cfg, userId, modality, kind) => Object.values(cfg.clubs || {}).some((club) => {
+  if (kind === "captain") return String(club?.captains?.[modality] || "") === String(userId);
+  return String(club?.subcaptains?.general || "") === String(userId)
+    || String(club?.subcaptains?.[modality] || "") === String(userId);
+});
+
+async function removeUnusedStaffRole(guild, cfg, member, modality, kind, errors) {
+  if (staffStillAssigned(cfg, member.id, modality, kind)) return;
+  const roleId = roleRegistry.getGeneralRole(cfg, guild.id, modality, kind)?.roleId;
+  if (!roleId || !member.roles.cache.has(roleId)) return;
+  try { await member.roles.remove(roleId, `Verificacion de limite ${modality}`); }
+  catch (error) { errors.push(`<@${member.id}>: no pude quitar rol ${kind} (${error.code || error.message})`); }
+}
+
+async function syncIdentityAfterLimit(guild, member, errors) {
+  const user = getUser(member.id);
+  let remaining = null;
+  for (const [clubName, entry] of Object.entries(user.clubAffiliations || {})) {
+    for (const [modality, affiliation] of Object.entries(entry?.modalities || {})) {
+      if (affiliation?.roleId) { remaining = { clubName, modality }; break; }
+    }
+    if (remaining) break;
+  }
+  try {
+    const identity = {
+      guildId: guild.id, discordUserId: member.id, discordUsername: member.user.tag,
+      discordAvatarUrl: member.displayAvatarURL({ size: 128 }), haxballName: member.displayName,
+      source: "verificar_limites"
+    };
+    if (remaining) {
+      const modalityRow = await haxoleSupabase.getModalidadRow(remaining.modality);
+      await haxoleSupabase.upsertPlayerIdentity({ ...identity,
+        clubId: await haxoleSupabase.getClubIdByName(remaining.clubName), clubName: remaining.clubName,
+        modalidadId: modalityRow?.id || null, modalidadName: remaining.modality });
+    } else await haxoleSupabase.upsertPlayerIdentity({ ...identity, clearCurrentClub: true, clearCurrentModality: true });
+  } catch (error) { errors.push(`<@${member.id}>: no pude sincronizar perfil web (${error.message})`); }
+}
+
+async function verifyRosterLimits(interaction) {
+  const guild = interaction.guild;
+  const cfg = readConfig();
+  const users = readUsers(guild.id);
+  const details = [];
+  const errors = [];
+  const touched = new Map();
+  const summary = { checked: 0, exceeded: 0, playersRemoved: 0, scRemoved: 0 };
+  let allMembers;
+  try {
+    allMembers = await guild.members.fetch({ force: true, time: 30000 });
+    if (!allMembers?.size || (guild.memberCount && allMembers.size < guild.memberCount)) {
+      throw new Error(`lista incompleta (${allMembers?.size || 0}/${guild.memberCount || "?"})`);
+    }
+  } catch (error) {
+    return interaction.editReply({ content: `No corregi ningun limite: no pude obtener la lista completa de miembros (${error.message}). Reintenta cuando Discord responda.` });
+  }
+
+  for (const [clubName, club] of Object.entries(cfg.clubs || {})) {
+    for (const [rawModality, roleId] of Object.entries(club?.roles || {})) {
+      const modality = roleRegistry.normalizeModality(rawModality);
+      if (!modality || !roleId) continue;
+      const role = guild.roles.cache.get(roleId) || await guild.roles.fetch(roleId).catch(() => null);
+      if (!role) { errors.push(`${clubName} ${modality}: rol no encontrado`); continue; }
+      summary.checked += 1;
+      const members = Array.from(allMembers.values()).filter((member) => member.roles.cache.has(roleId));
+      const cancelledIds = new Set();
+      const limit = Number(cfg.roleLimits?.[roleId] ?? cfg.roleLimits?.[modality]);
+      if (Number.isInteger(limit) && limit > 0 && members.length > limit) {
+        summary.exceeded += 1;
+        const plan = latestExcessSignings(members, users, clubName, modality, limit);
+        if (plan.undated.length) {
+          errors.push(`${clubName} ${modality}: ${members.length}/${limit}; faltan fechas de fichaje (${plan.undated.length}). No se cancelo a nadie al azar.`);
+        } else if (plan.ambiguous) {
+          errors.push(`${clubName} ${modality}: ${members.length}/${limit}; dos fichajes tienen la misma fecha en el corte. No se cancelo a nadie al azar.`);
+        } else {
+          for (const candidate of plan.selected) {
+            let member;
+            try {
+              member = await guild.members.fetch({ user: candidate.id, force: true });
+              if (!member?.roles.cache.has(roleId)) continue;
+              await member.roles.remove(roleId, `Exceso de cupo ${clubName} ${modality} (${members.length}/${limit})`);
+            } catch (error) { errors.push(`${clubName} ${modality} <@${candidate.id}>: ${error.code || error.message}`); continue; }
+
+            cancelledIds.add(member.id);
+            try { removeUserClubAffiliation(member.id, { club: clubName, modality, roleId }); }
+            catch (error) { errors.push(`<@${member.id}>: no pude actualizar su fichaje (${error.message})`); }
+            try { addHistory(member.id, "CANCELAR_LIMITE", { club: clubName, modality, by: interaction.user.tag }); }
+            catch (error) { errors.push(`<@${member.id}>: no pude guardar el historial (${error.message})`); }
+            if (String(club.captains?.[modality] || "") === String(member.id)) delete club.captains[modality];
+            if (String(club.subcaptains?.[modality] || "") === String(member.id)) delete club.subcaptains[modality];
+            const removedGeneralSC = String(club.subcaptains?.general || "") === String(member.id);
+            if (removedGeneralSC) delete club.subcaptains.general;
+            saveConfig(cfg);
+            await removeUnusedStaffRole(guild, cfg, member, modality, "captain", errors);
+            await removeUnusedStaffRole(guild, cfg, member, modality, "subcaptain", errors);
+            if (removedGeneralSC) {
+              for (const otherRawModality of Object.keys(club.roles || {})) {
+                const otherModality = roleRegistry.normalizeModality(otherRawModality);
+                if (!otherModality || otherModality === modality) continue;
+                await removeUnusedStaffRole(guild, cfg, member, otherModality, "subcaptain", errors);
+                touched.set(`${clubName}:${otherModality}`, { clubName, modality: otherModality });
+              }
+            }
+            await divisions.syncMemberDivisionRoles(guild, member, cfg, modality, { ensure: false }).catch((error) => errors.push(`<@${member.id}>: ${error.message}`));
+            await syncIdentityAfterLimit(guild, member, errors);
+            if (cfg.automation?.autoNicknames !== false) await nicknames.updateNickname(member).catch(() => null);
+            summary.playersRemoved += 1;
+            pushLimited(details, `${clubName} ${modality}: <@${member.id}> (fichaje reciente)`);
+            touched.set(`${clubName}:${modality}`, { clubName, modality });
+          }
+        }
+      }
+
+      const scLimit = Number(cfg.subcaptainLimits?.[modality] ?? cfg.subcaptainLimit ?? 1);
+      if (!Number.isInteger(scLimit) || scLimit <= 0) continue;
+      const scIds = [...new Set([club.subcaptains?.general, club.subcaptains?.[modality]].filter(Boolean))]
+        .filter((id) => !cancelledIds.has(id) && allMembers.get(id)?.roles.cache.has(roleId));
+      if (scIds.length <= scLimit) continue;
+      summary.exceeded += 1;
+      const ranked = scIds.map((id) => ({ id, at: subcaptainTime(users[id], clubName, modality) }));
+      if (ranked.some((item) => item.at === null)) {
+        errors.push(`${clubName} ${modality}: ${scIds.length}/${scLimit} SC; faltan fechas de asignacion. No se quito ningun SC al azar.`);
+        continue;
+      }
+      ranked.sort((a, b) => b.at - a.at || String(b.id).localeCompare(String(a.id)));
+      const scExcess = scIds.length - scLimit;
+      if (ranked[scExcess - 1]?.at === ranked[scExcess]?.at) {
+        errors.push(`${clubName} ${modality}: SC con la misma fecha de asignacion. No se quito ninguno al azar.`);
+        continue;
+      }
+      for (const { id } of ranked.slice(0, scExcess)) {
+        const removedGeneralSC = String(club.subcaptains?.general || "") === String(id);
+        if (removedGeneralSC) {
+          delete club.subcaptains.general;
+          for (const mod of Object.keys(club.roles || {})) touched.set(`${clubName}:${mod}`, { clubName, modality: mod });
+        }
+        if (String(club.subcaptains?.[modality] || "") === String(id)) delete club.subcaptains[modality];
+        saveConfig(cfg);
+        const member = allMembers.get(id);
+        await removeUnusedStaffRole(guild, cfg, member, modality, "subcaptain", errors);
+        if (removedGeneralSC) {
+          for (const otherRawModality of Object.keys(club.roles || {})) {
+            const otherModality = roleRegistry.normalizeModality(otherRawModality);
+            if (otherModality && otherModality !== modality) await removeUnusedStaffRole(guild, cfg, member, otherModality, "subcaptain", errors);
+          }
+        }
+        try { addHistory(id, "SC_REMOVED_LIMIT", { club: clubName, modality, by: interaction.user.tag }); }
+        catch (error) { errors.push(`<@${id}>: no pude guardar el historial SC (${error.message})`); }
+        summary.scRemoved += 1;
+        pushLimited(details, `${clubName} ${modality}: SC <@${id}> retirado`);
+        touched.set(`${clubName}:${modality}`, { clubName, modality });
+      }
+    }
+  }
+
+  for (const { clubName, modality } of touched.values()) {
+    await updateLinkedForumTemplates(guild, clubName, modality).catch((error) => errors.push(`${clubName} ${modality}: plantilla no actualizada (${error.message})`));
+  }
+  const lines = [
+    `Plantillas revisadas: **${summary.checked}**`,
+    `Excesos detectados: **${summary.exceeded}**`,
+    `Fichajes recientes cancelados: **${summary.playersRemoved}**`,
+    `Asignaciones SC retiradas: **${summary.scRemoved}**`
+  ];
+  if (details.length) lines.push(`Cambios: ${details.join(" | ")}`);
+  if (errors.length) lines.push(`Pendiente/errores: ${errors.slice(0, 8).join(" | ")}${errors.length > 8 ? ` | y ${errors.length - 8} mas` : ""}`);
+  return interaction.editReply({ embeds: [new EmbedBuilder().setTitle("Verificacion de limites").setDescription(lines.join("\n")).setColor(errors.length ? 0xf1c40f : 0x2ecc71)] });
 }

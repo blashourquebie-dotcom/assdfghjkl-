@@ -48,21 +48,36 @@ module.exports = {
       });
     }
 
-    const limit = Number(cfg.subcaptainLimit || 1);
-    const currentScCount = Object.values(cfg.clubs || {}).filter((club) =>
-      String(club?.subcaptains?.general || "") === String(usuario.id)
-    ).length;
-    if (limit > 0 && currentScCount >= limit) {
-      return interaction.reply({
-        content: `**${usuario.tag}** ya llego al limite de SC (${currentScCount}/${limit}).`,
-        flags: 64
-      });
+    for (const [rawMod, roleId] of Object.entries(clubEntry.roles || {})) {
+      const mod = roleRegistry.normalizeModality(rawMod);
+      if (!mod || !member.roles.cache.has(roleId)) continue;
+      const limit = Number(cfg.subcaptainLimits?.[mod] ?? cfg.subcaptainLimit ?? 1);
+      const nextCount = new Set([usuario.id, cfg.clubs[clubEntry.name]?.subcaptains?.[mod]].filter(Boolean)).size;
+      if (limit > 0 && nextCount > limit) {
+        return interaction.reply({ content: `**${clubEntry.name} ${mod}** quedaria con ${nextCount}/${limit} SC. Quita la asignacion anterior antes de agregar otra.`, flags: 64 });
+      }
     }
 
     cfg.clubs[clubEntry.name].subcaptains = cfg.clubs[clubEntry.name].subcaptains || {};
+    const previousSC = cfg.clubs[clubEntry.name].subcaptains.general;
     cfg.clubs[clubEntry.name].subcaptains.general = usuario.id;
     saveConfig(cfg);
-    addHistory(usuario.id, "SC", { club: clubEntry.name, by: interaction.user.tag, limit });
+    addHistory(usuario.id, "SC", { club: clubEntry.name, by: interaction.user.tag });
+
+    if (previousSC && String(previousSC) !== String(usuario.id)) {
+      const previousMember = await interaction.guild.members.fetch(previousSC).catch(() => null);
+      if (previousMember) for (const [rawMod, clubRoleId] of Object.entries(clubEntry.roles || {})) {
+        const mod = roleRegistry.normalizeModality(rawMod);
+        if (!mod || !previousMember.roles.cache.has(clubRoleId)) continue;
+        const stillSC = Object.values(cfg.clubs || {}).some((club) =>
+          String(club?.subcaptains?.general || "") === String(previousSC)
+          || String(club?.subcaptains?.[mod] || "") === String(previousSC));
+        const oldRoleId = roleRegistry.getGeneralRole(cfg, interaction.guild.id, mod, "subcaptain")?.roleId;
+        if (!stillSC && oldRoleId && previousMember.roles.cache.has(oldRoleId)) {
+          await previousMember.roles.remove(oldRoleId, `SC reemplazado en ${clubEntry.name}`).catch(() => null);
+        }
+      }
+    }
 
     for (const [mod, roleId] of Object.entries(clubEntry.roles || {})) {
       if (!member.roles.cache.has(roleId)) continue;

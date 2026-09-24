@@ -15,7 +15,7 @@ module.exports = {
     const max = interaction.options.getInteger("max");
     const cfg = readConfig();
     if (max <= 0) {
-      delete cfg.subcaptainLimit;
+      cfg.subcaptainLimit = 0;
       saveConfig(cfg);
       return interaction.reply({ content: "Limite de SC eliminado.", flags: 64 });
     }

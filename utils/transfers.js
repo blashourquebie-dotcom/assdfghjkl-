@@ -14,6 +14,7 @@ const { updateLinkedForumTemplates } = require("./plantillas");
 const { isCaptain } = require("./clubPermissions");
 const divisions = require("./divisions");
 const haxoleSupabase = require("./haxoleSupabase");
+const { withRoleLimitLock } = require("./roleLimitLock");
 
 const CHECK_EMOJI = "\u2705";
 const REJECT_EMOJI = "\u274C";
@@ -255,11 +256,23 @@ const applyPendingTransfer = async (client, messageId, reactingUserId) => {
       return fail("captain_blocked");
     }
 
+    return await withRoleLimitLock(guild.id, transfer.toRoleId, async () => {
     const roleLimit = validators.getRoleLimit(transfer.toRoleId, mod);
     if (roleLimit) {
       const role = await guild.roles.fetch(transfer.toRoleId).catch(() => null);
-      await guild.members.fetch().catch(() => null);
-      const currentCount = role?.members?.size ?? 0;
+      let allMembers;
+      try {
+        allMembers = await guild.members.fetch({ force: true, time: 30000 });
+        if (!allMembers?.size || (guild.memberCount && allMembers.size < guild.memberCount)) throw new Error("lista incompleta");
+      } catch {
+        updatePendingTransfer(messageId, { status: "pending", processingBy: null, processingAt: null });
+        return fail("members_unavailable");
+      }
+      if (!role) {
+        updatePendingTransfer(messageId, { status: "pending", processingBy: null, processingAt: null });
+        return fail("target_role_missing");
+      }
+      const currentCount = Array.from(allMembers.values()).filter((entry) => entry.roles.cache.has(transfer.toRoleId)).length;
       const alreadyInTarget = member.roles.cache.has(transfer.toRoleId);
       if (!alreadyInTarget && currentCount >= roleLimit) {
         const channel = await guild.channels.fetch(transfer.channelId).catch(() => null);
@@ -322,6 +335,7 @@ const applyPendingTransfer = async (client, messageId, reactingUserId) => {
     }).catch(() => null);
 
     return { ok: true };
+    });
   } catch (error) {
     console.error("[transfers] Error aplicando transferencia:", error);
     updatePendingTransfer(messageId, { status: "pending", processingBy: null, processingAt: null });

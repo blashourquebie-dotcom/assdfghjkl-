@@ -24,10 +24,13 @@ module.exports = {
     const cfg = readConfig();
 
     if (tipo === "sc" || String(modalityRaw || "").toLowerCase().trim() === "sc") {
-      const limit = Number((modality && cfg.subcaptainLimits?.[modality]) ?? cfg.subcaptainLimit ?? 1);
       const lines = Object.entries(cfg.clubs || {}).map(([clubName, club]) => {
-        const count = club?.subcaptains?.general ? 1 : 0;
-        return `${count <= limit ? "✅" : "🚨"} ${clubName}: ${count}/${limit}`;
+        const modalities = modality ? [modality] : Object.keys(club?.roles || {}).map(roleRegistry.normalizeModality).filter(Boolean);
+        return modalities.map((mod) => {
+          const limit = Number(cfg.subcaptainLimits?.[mod] ?? cfg.subcaptainLimit ?? 1);
+          const count = new Set([club?.subcaptains?.general, club?.subcaptains?.[mod]].filter(Boolean)).size;
+          return `${limit <= 0 || count <= limit ? "✅" : "🚨"} ${clubName} ${mod}: ${count}/${limit > 0 ? limit : "sin limite"}`;
+        }).join("\n");
       });
       return interaction.reply({
         content: `**Revision de limites SC**\n${(lines.join("\n") || "No hay clubes.").slice(0, 1900)}`,
@@ -48,6 +51,14 @@ module.exports = {
     const roles = Array.from(rolesById.values());
     if (!roles.length) return interaction.reply({ content: `No hay roles de clubes registrados en **${modality}**.`, flags: 64 });
 
+    let allMembers;
+    try {
+      allMembers = await interaction.guild.members.fetch({ force: true, time: 30000 });
+      if (!allMembers?.size || (interaction.guild.memberCount && allMembers.size < interaction.guild.memberCount)) throw new Error("lista incompleta");
+    } catch {
+      return interaction.reply({ content: "No pude cargar todos los miembros. No voy a mostrar un conteo incompleto; volve a intentar.", flags: 64 });
+    }
+
     const lines = [];
     for (const entry of roles) {
       const role = await interaction.guild.roles.fetch(entry.roleId).catch(() => null);
@@ -62,7 +73,7 @@ module.exports = {
         continue;
       }
 
-      const count = role.members.size;
+      const count = Array.from(allMembers.values()).filter((member) => member.roles.cache.has(role.id)).length;
       const ok = count <= limit;
       lines.push(`${ok ? "✅" : "🚨"} ${role.name}: ${count}/${limit}`);
     }

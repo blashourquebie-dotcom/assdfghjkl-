@@ -4,7 +4,7 @@ const clubs = require("../utils/clubs");
 const validators = require("../utils/validators");
 const nicknames = require("../utils/nicknames");
 const roleRegistry = require("../utils/roleRegistry");
-const { updateLinkedForumTemplates, ensureGuildMembersLoaded } = require("../utils/plantillas");
+const { updateLinkedForumTemplates } = require("../utils/plantillas");
 const { sendAlert, sendCapActionAlert } = require("../utils/alerts");
 const market = require("../utils/market");
 const { sendTempInteractionReply } = require("../utils/tempMessage");
@@ -14,6 +14,7 @@ const divisions = require("../utils/divisions");
 const { ensureClubRoleForModality } = require("../utils/clubRoleRecovery");
 const { ensureGeneralRolesForModality } = require("../utils/serverSetup");
 const haxoleSupabase = require("../utils/haxoleSupabase");
+const { withRoleLimitLock } = require("../utils/roleLimitLock");
 
 const TEMP_REPLY_MS = 10000;
 
@@ -70,6 +71,8 @@ module.exports = {
     const roleId = clubs.getRoleForClub(clubEntry, modality) || clubRoleRecovery?.role?.id || null;
     if (!roleId) return interaction.editReply({ content: `No pude recuperar el rol de club de **${clubEntry.name}** para **${modality}**.` });
 
+    return withRoleLimitLock(interaction.guild.id, roleId, async () => {
+
     const autoNicknames = cfg.automation?.autoNicknames !== false;
 
     const userIds = parseUserIds(interaction.options.getString("usuarios"));
@@ -115,13 +118,17 @@ module.exports = {
       .length;
     const roleLimit = validators.getRoleLimit(roleId, modality);
     if (roleLimit && newSigningCount > 0) {
-      try { await ensureGuildMembersLoaded(interaction.guild); }
+      let allMembers;
+      try {
+        allMembers = await interaction.guild.members.fetch({ force: true, time: 30000 });
+        if (!allMembers?.size || (interaction.guild.memberCount && allMembers.size < interaction.guild.memberCount)) throw new Error("lista incompleta");
+      }
       catch (error) {
         return interaction.editReply({ content: 'No pude consultar la lista completa del rol. Revisá el intent de miembros de Discord y volvé a intentar.' });
       }
       const role = await interaction.guild.roles.fetch(roleId).catch(() => null);
       if (!role) return interaction.editReply({ content: 'No pude consultar el rol del club. Volvé a intentar.' });
-      const currentCount = role.members.size;
+      const currentCount = Array.from(allMembers.values()).filter((entry) => entry.roles.cache.has(roleId)).length;
       if (currentCount + newSigningCount > roleLimit) {
         return sendTempInteractionReply(interaction, {
           content: [
@@ -252,5 +259,6 @@ module.exports = {
     }, TEMP_REPLY_MS);
 
     return response;
+    });
   }
 };
