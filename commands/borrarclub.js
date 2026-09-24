@@ -54,7 +54,7 @@ async function handleSelect(interaction, [action, token]) {
   const selected = session.rows[Number(interaction.values[0])];
   if (!selected) return interaction.reply({ content: 'El club no está en esta lista.', flags: 64 });
   session.selected = selected;
-  return interaction.update({ content: `¿Borrar **${selected.name}**? Se deshabilitarán sus roles, jugadores y foros. Desaparecerá de las listas activas, pero se conservarán sus resultados en torneos finalizados. Si tiene partidos en torneos activos, no se borrará.`, components: [new ActionRowBuilder().addComponents(
+  return interaction.update({ content: `¿Borrar **${selected.name}**? Se deshabilitarán sus roles, jugadores y foros. Los partidos pendientes en torneos activos quedarán 1-0 por DF para el rival; los resultados ya jugados se conservan. Si un partido está en curso o tiene datos parciales, la baja se detendrá.`, components: [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`borrarclub:confirm:${token}`).setLabel('Sí, borrar club').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`borrarclub:cancel:${token}`).setLabel('Cancelar').setStyle(ButtonStyle.Secondary)
   )] });
@@ -99,7 +99,7 @@ async function handleComponent(interaction, [action, detail, possibleToken]) {
         throw new Error(`La baja en Supabase se guardó, pero el bot no terminó de deshabilitar los roles: ${response?.content || 'revisá los logs'}. Podés volver a ejecutar /borrarclub.`);
       }
     }
-    return interaction.editReply({ content: `Club **${selected.name}** dado de baja. Ya no figura como activo; su historial finalizado se conserva.`, components: [] });
+    return interaction.editReply({ content: `Club **${selected.name}** dado de baja. Los partidos pendientes se otorgaron 1-0 por DF a sus rivales; los resultados ya jugados se conservaron.`, components: [] });
   } catch (error) { return interaction.editReply({ content: error.message || 'No se pudo borrar el club.', components: [] }); }
 }
 
