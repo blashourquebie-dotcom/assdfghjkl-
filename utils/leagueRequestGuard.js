@@ -46,8 +46,9 @@ async function guard(path, options, read) {
   if (!scope.allowedGuild(guild)) deny('Falta un servidor autorizado para realizar el cambio.');
   if (guild === scope.TEST_GUILD) return options;
   if (path.startsWith('rpc/')) {
-    if (['rpc/configure_cup_byes', 'rpc/append_configured_tournament_fixture', 'rpc/append_tournament_fixture'].includes(path)) {
-      await assertTournament(body?.p_tournament);
+    if (['rpc/configure_cup_byes', 'rpc/append_configured_tournament_fixture', 'rpc/append_tournament_fixture', 'rpc/bot_replace_disabled_club'].includes(path)) {
+      await assertTournament(path === 'rpc/bot_replace_disabled_club' ? body?.p_id : body?.p_tournament);
+      if (path === 'rpc/bot_replace_disabled_club' && body?.p_guild !== guild) deny();
       for (const row of rows(body?.p_rows)) {
         if (row.torneo_id && row.torneo_id !== body.p_tournament) deny();
       }

@@ -676,6 +676,16 @@ const setTournamentClub = async ({ torneoId, clubName, position = null, replaceC
   return Array.isArray(upserted.data) ? upserted.data[0] || null : null;
 };
 
+const replaceDisabledTournamentClub = async ({ torneoId, incomingClubId, outgoingClubId, guildId }) => {
+  const result = await request('rpc/bot_replace_disabled_club', {
+    method: 'POST',
+    body: { p_id: torneoId, p_new: incomingClubId, p_old: outgoingClubId, p_guild: String(guildId) },
+    prefer: 'return=minimal'
+  });
+  if (!result.ok) throw new Error(result.error || `No se pudo reemplazar el cupo (HTTP ${result.status || 0})`);
+  return true;
+};
+
 const upsertOfficialMatch = async ({ modality, torneoName, fecha, clubLocalName, clubVisitanteName, golesLocal, golesVisitante, reportContent, recUrl = null }) => {
   const torneo = await getTournament({ modality, name: torneoName });
   if (!torneo) return null;
@@ -1078,6 +1088,7 @@ module.exports = {
   getTournamentClubRows,
   getNextMatchFecha,
   setTournamentClub,
+  replaceDisabledTournamentClub,
   removeTournamentClub,
   listFixtureRows,
   deleteFixtureRows,

@@ -87,31 +87,34 @@ module.exports = {
     if (!clubEntry) {
       return interaction.reply({ content: `No encontré el club **${clubQuery}**.`, flags: 64 });
     }
+    if (!clubs.getRoleForClub(clubEntry, modality)) {
+      return interaction.reply({ content: `**${clubEntry.name}** no está habilitado en **${modality}**.`, flags: 64 });
+    }
 
     const replaceClubEntry = replaceClubQuery ? clubs.findClub(replaceClubQuery) : null;
     const torneo = await haxoleSupabase.getTournament({ modality, name: torneoName });
     if (!torneo) {
       return interaction.reply({ content: `No encontré el torneo **${torneoName}** en **${modality}**.`, flags: 64 });
     }
+    if (torneo.estado && torneo.estado !== 'activo') {
+      return interaction.reply({ content: `**${torneo.nombre}** no está activo; no se pueden modificar sus cupos.`, flags: 64 });
+    }
 
     const currentRows = await haxoleSupabase.getTournamentClubRows(torneo.id);
-    const replaceRow = replaceClubEntry
-      ? currentRows.find((row) => String(row.club?.nombre || row.club_id) === String(replaceClubEntry.name))
-      : null;
+    const inactiveRows = currentRows.filter(row => !clubs.getRoleForClub(clubs.findClub(row.club?.nombre), modality));
+    const replaceRow = replaceClubQuery
+      ? currentRows.find(row => String(row.club?.nombre || '').toLowerCase() === String(replaceClubEntry?.name || replaceClubQuery).toLowerCase())
+      : inactiveRows.sort((a,b)=>Number(a.posicion||0)-Number(b.posicion||0))[0] || null;
     const alreadyLinked = currentRows.some((row) => String(row.club?.nombre || row.club_id) === String(clubEntry.name));
-
-    if (replaceClubQuery && !replaceClubEntry) {
-      return interaction.reply({
-        content: `No encontré el club a reemplazar **${replaceClubQuery}**.`,
-        flags: 64
-      });
-    }
 
     if (replaceClubQuery && !replaceRow) {
       return interaction.reply({
-        content: `No encontré el club a reemplazar **${replaceClubEntry.name}** dentro de **${torneo.nombre}**.`,
+        content: `No encontré el club a reemplazar **${replaceClubQuery}** dentro de **${torneo.nombre}**.`,
         flags: 64
       });
+    }
+    if (replaceRow && !inactiveRows.some(row=>row.club_id===replaceRow.club_id)) {
+      return interaction.reply({ content: `**${replaceRow.club?.nombre}** sigue habilitado en ${modality}; no se le puede quitar el cupo automáticamente.`, flags: 64 });
     }
 
     if (alreadyLinked && !replaceRow) {
@@ -128,20 +131,26 @@ module.exports = {
       });
     }
 
-    const targetPosition = replaceRow ? Number(replaceRow.posicion) || currentRows.length + 1 : currentRows.length + 1;
-
-    await haxoleSupabase.setTournamentClub({
-      torneoId: torneo.id,
-      clubName: clubEntry.name,
-      position: targetPosition,
-      replaceClubId: replaceRow ? replaceRow.club_id : null
-    }).catch((error) => {
+    try {
+      if (replaceRow) {
+        const incoming = await haxoleSupabase.ensureClubRow(clubEntry.name);
+        if (!incoming?.id) throw new Error('No se encontró el club habilitado en la base de datos.');
+        await haxoleSupabase.replaceDisabledTournamentClub({ torneoId: torneo.id, incomingClubId: incoming.id, outgoingClubId: replaceRow.club_id, guildId: interaction.guild.id });
+      } else {
+        const occupied = new Set(currentRows.map(row=>Number(row.posicion)).filter(Number.isInteger));
+        const targetPosition = Array.from({length:Number(torneo.cantidad_equipos||0)},(_,i)=>i+1).find(position=>!occupied.has(position));
+        if (!targetPosition) throw new Error('No queda un cupo libre en el torneo.');
+        const inserted = await haxoleSupabase.setTournamentClub({ torneoId: torneo.id, clubName: clubEntry.name, position: targetPosition });
+        if (!inserted) throw new Error('No se pudo confirmar la inscripción en la base de datos.');
+      }
+    } catch (error) {
       console.error("[entry] Error inscribiendo club en torneo:", error);
-    });
+      return interaction.reply({ content: `No se pudo inscribir el club: ${error.message || error}`, flags: 64 });
+    }
 
     return interaction.reply({
       content: replaceRow
-        ? `✅ Club **${clubEntry.name}** reemplazó a **${replaceClubQuery}** en **${torneo.nombre}** (${modality}).`
+        ? `✅ Club **${clubEntry.name}** ocupó el cupo de **${replaceRow.club?.nombre || replaceClubQuery}** en **${torneo.nombre}** (${modality}). Los partidos ya jugados conservan su historial.`
         : `✅ Club **${clubEntry.name}** inscrito en **${torneo.nombre}** (${modality}).`,
       flags: 64
     });

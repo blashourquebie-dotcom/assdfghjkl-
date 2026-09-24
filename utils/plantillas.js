@@ -229,6 +229,7 @@ const syncMemberClubRoles = async (guild, member, previousRoleIds = []) => {
   user.clubRoles ||= {};
   user.clubAffiliations ||= {};
   let modified = false;
+  const identityUpdates = [];
   for (const modality of new Set(changed.map(entry => entry.modality))) {
     const current = Object.entries(cfg.clubs || {}).flatMap(([clubName, club]) =>
       Object.entries(club.roles || {}).filter(([rawMod, roleId]) => roleRegistry.normalizeModality(rawMod) === modality && currentRoles.has(roleId))
@@ -248,6 +249,7 @@ const syncMemberClubRoles = async (guild, member, previousRoleIds = []) => {
         affiliation.modalities[modality] = { roleId: selected.roleId, signedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), by: 'discord-role' };
         modified = true;
       }
+      identityUpdates.push({ clubName: selected.clubName, modality });
     } else {
       if (user.clubRoles[modality]) { delete user.clubRoles[modality]; modified = true; }
       for (const [name, entry] of Object.entries(user.clubAffiliations)) {
@@ -259,6 +261,20 @@ const syncMemberClubRoles = async (guild, member, previousRoleIds = []) => {
     }
   }
   if (modified) { users[userId] = user; saveUsers(users); }
+  if (modified) for (const entry of identityUpdates) {
+    const [clubId, modalidad] = await Promise.all([
+      haxoleSupabase.getClubIdByName(entry.clubName).catch(() => null),
+      haxoleSupabase.getModalidadRow(entry.modality).catch(() => null)
+    ]);
+    await haxoleSupabase.upsertPlayerIdentity({
+      guildId: guild.id, discordUserId: userId,
+      discordUsername: member.user?.tag || member.user?.username || null,
+      discordAvatarUrl: member.user?.displayAvatarURL?.({ size: 128 }) || null,
+      haxballName: member.displayName || member.user?.username || userId,
+      clubId, clubName: entry.clubName, modalidadId: modalidad?.id || null,
+      modalidadName: entry.modality, source: 'discord-role'
+    }).catch(() => null);
+  }
   for (const entry of changed) scheduleTemplateRefresh(guild, entry.clubName, entry.modality);
   return changed.length;
 };
