@@ -491,11 +491,48 @@ const getTournament = async ({ modality, name, tipo = tournamentScope.currentLea
   return candidates[0] || null;
 };
 
-const removeTournament = async ({ modality, name }) => {
-  const torneo = await getTournament({ modality, name });
+const inspectTournamentRemoval = async ({ modality, name }) => {
+  const league = tournamentScope.currentLeague();
+  if (!league) throw new Error("No se pudo identificar la liga. No se borró nada.");
+  const mod = roleRegistry.normalizeModality(modality);
+  if (!mod || !String(name || "").trim()) return null;
+  const modalityResult = await selectRows("modalidades", { nombre: `eq.${mod}` });
+  if (!modalityResult.ok || !Array.isArray(modalityResult.data)) throw new Error("No pude verificar la modalidad. No se borró nada.");
+  const modalityRow = modalityResult.data[0];
+  if (!modalityRow) return null;
+  const tournamentResult = await selectRows("torneos", { modalidad_id: `eq.${modalityRow.id}`, nombre: `eq.${String(name).trim()}`, tipo: `eq.${league}` });
+  if (!tournamentResult.ok || !Array.isArray(tournamentResult.data)) throw new Error("No pude verificar el torneo. No se borró nada.");
+  if (tournamentResult.data.length > 1) throw new Error("Hay más de un torneo con ese nombre en la liga. No se borró nada.");
+  const torneo = tournamentResult.data[0];
   if (!torneo) return null;
-  await deleteRows("torneos", { id: `eq.${torneo.id}` });
-  return torneo;
+  const references = [
+    ["partidos", { torneo_id: `eq.${torneo.id}` }, "partidos"],
+    ["torneo_clubes", { torneo_id: `eq.${torneo.id}` }, "clubes inscriptos"],
+    ["tournament_round_schedule", { torneo_id: `eq.${torneo.id}` }, "rondas programadas"],
+    ["fixture_delete_requests", { torneo_id: `eq.${torneo.id}` }, "solicitudes de fixture"],
+    ["jugador_aliases", { first_torneo_id: `eq.${torneo.id}` }, "historial de jugadores"],
+    ["jugador_aliases", { last_torneo_id: `eq.${torneo.id}` }, "historial de jugadores"]
+  ];
+  const blockers = new Set();
+  for (const [table, filters, label] of references) {
+    const result = await selectRows(table, { ...filters, limit: 1 });
+    if (!result.ok && result.status === 404) continue; // Older deployments may lack optional tables.
+    if (!result.ok || !Array.isArray(result.data)) throw new Error(`No pude comprobar ${label}. No se borró nada.`);
+    if (result.data.length) blockers.add(label);
+  }
+  return { torneo, blockers: [...blockers] };
+};
+
+const removeTournament = async ({ modality, name }) => {
+  const inspected = await inspectTournamentRemoval({ modality, name });
+  if (!inspected) return null;
+  if (inspected.blockers.length) throw new Error(`El torneo tiene ${inspected.blockers.join(", ")}. No se borró nada.`);
+  const removed = await request("rpc/bot_delete_empty_tournament", { method: "POST", body: { p_id: inspected.torneo.id, p_expected_name: inspected.torneo.nombre, p_tipo: tournamentScope.currentLeague() } });
+  if (!removed.ok) throw new Error(removed.status === 404 ? "Falta aplicar la migración de borrado seguro en Supabase. No se borró nada." : `No se pudo borrar el torneo: ${removed.error || removed.status}`);
+  if (removed.data !== true) throw new Error("El torneo cambió o ya no existe. No se borró nada.");
+  const remaining = await selectRows("torneos", { id: `eq.${inspected.torneo.id}` });
+  if (!remaining.ok || !Array.isArray(remaining.data) || remaining.data.length) throw new Error("No pude confirmar el borrado del torneo. Revisá Supabase antes de reintentar.");
+  return inspected.torneo;
 };
 
 const updateTournament = async ({ modality, name, patch = {} }) => {
@@ -1079,6 +1116,7 @@ module.exports = {
   ensureClubRow,
   ensureTournament,
   getTournament,
+  inspectTournamentRemoval,
   removeTournament,
   updateTournament,
   adjustTournamentSlots,

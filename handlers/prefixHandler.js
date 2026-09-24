@@ -320,7 +320,7 @@ const buildOptionMap = (commandName, rawArgs, args) => {
     optionMap.tipo = getNamedArg(rawArgs, ["tipo"]) || null;
   } else if (commandName === 'server') {
     optionMap.nombre = getNamedArg(rawArgs, ["nombre", "server", "servidor"]) || cleanedArgs.join(" ") || null;
-  } else if (commandName === 'eliminartorneo') {
+  } else if (commandName === 'eliminartorneo' || commandName === 'borrartorneo') {
     optionMap.modalidad = getNamedArg(rawArgs, ["modalidad"]) || cleanedArgs[0] || null;
     optionMap.torneo = getNamedArg(rawArgs, ["torneo", "nombre"]) || cleanedArgs.slice(1).join(" ") || null;
   } else if (commandName === 'vincularinformes') {

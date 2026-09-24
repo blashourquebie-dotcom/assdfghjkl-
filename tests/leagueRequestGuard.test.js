@@ -53,6 +53,9 @@ test('foreign fixtures, enrollments, RPC reports, and players rejected by ID', a
   await request('rpc/publish_approved_report',{method:'POST',body:{p_match_id:'ma',p_stats:[{jugador_id:'pa'}]}});
   await request('rpc/append_configured_tournament_fixture',{method:'POST',body:{p_tournament:'a',p_rows:[]}});
   await assert.rejects(request('rpc/append_configured_tournament_fixture',{method:'POST',body:{p_tournament:'a',p_rows:[{torneo_id:'t'}]}}),/otra liga/);
+  await request('rpc/bot_delete_empty_tournament',{method:'POST',body:{p_id:'a',p_tipo:'ash'}});
+  await assert.rejects(request('rpc/bot_delete_empty_tournament',{method:'POST',body:{p_id:'t',p_tipo:'ash'}}),/otra liga/);
+  await assert.rejects(request('rpc/bot_delete_empty_tournament',{method:'POST',body:{p_id:'a',p_tipo:'tematico'}}),/otra liga/);
   const result=await request('partidos',{method:'PATCH',params:{id:'eq.ma'},body:{jugado:true}});
   assert.equal(result.params.and,'(torneo_id.in.(a))');
  });
