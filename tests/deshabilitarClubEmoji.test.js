@@ -34,3 +34,24 @@ test('el emoji se elimina solo al deshabilitar la última modalidad del club', a
     assert.equal(database.readConfig().clubs.Azul, undefined);
   });
 });
+
+test('sancionar es opcional y queda registrado solo cuando se solicita', async () => {
+  const guildId = 'disable-sanction-test';
+  const guild = {
+    id: guildId, roles: { fetch: async () => ({ members: new Map(), delete: async () => {} }) },
+    emojis: { cache: new Map(), fetch: async () => null }, members: { fetch: async () => null }
+  };
+  await database.withGuild(guildId, async () => {
+    const cfg = database.readConfig();
+    cfg.clubs = { Azul: { roles: { x3: 'role-x3' } } };
+    cfg.forumClubs = {};
+    database.saveConfig(cfg);
+    database.saveUsers({});
+    await executeDisableClub({
+      guild, user: { id: 'admin', tag: 'admin' }, member: { permissions: { has: () => true } },
+      options: { getString: key => key === 'club' ? 'Azul' : null, getBoolean: key => key === 'sancionar' },
+      reply: async value => value
+    });
+    assert.equal(database.readConfig().archivedClubs.Azul.sanctioned, true);
+  });
+});

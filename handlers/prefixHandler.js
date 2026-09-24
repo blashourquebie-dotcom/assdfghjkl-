@@ -263,9 +263,13 @@ const buildOptionMap = (commandName, rawArgs, args) => {
     optionMap.modalidad = parsed.modalidad || null;
     optionMap.foro = null;
   } else if (commandName === 'deshabilitarclub') {
-    const parsed = splitClubAndModality(rawArgs);
-    optionMap.club = parsed.club || args[0] || null;
-    optionMap.modalidades = parsed.modalidad || args.slice(1).join(' ') || null;
+    const sanctionOption = getNamedArg(rawArgs, ['sancionar']);
+    const withoutSanction = rawArgs.replace(/\bsancionar\s*[:=]\s*(?:s[ií]|no|true|false|1|0)\b/ig, '').trim();
+    const parsed = splitClubAndModality(withoutSanction);
+    const hasModality = Boolean(require('../utils/roleRegistry').normalizeModality(parsed.modalidad)) || /^(?:all|todo|todos|todas)$/i.test(parsed.modalidad || '');
+    optionMap.club = (hasModality ? parsed.club : parseArgs(withoutSanction).join(' ')) || null;
+    optionMap.modalidades = hasModality ? parsed.modalidad : null;
+    optionMap.sancionar = /^(s[ií]|true|1)$/i.test(String(sanctionOption || ''));
   } else if (commandName === 'fichar' || commandName === 'cancelar') {
     optionMap.usuarios = (rawArgs.match(/<@!?\d+>|\b\d{15,25}\b/g) || []).join(', ');
     const withoutUsers = rawArgs.replace(/<@!?\d+>|\b\d{15,25}\b/g, '').replace(/^[,\s]+|[,\s]+$/g, '');

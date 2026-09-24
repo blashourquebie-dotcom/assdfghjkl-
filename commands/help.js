@@ -49,8 +49,8 @@ const COMMANDS = {
   },
   script: {
     usage: "!script",
-    short: "Muestra la plantilla del script oficial para oficiales.",
-    detail: "Resume comandos, uso y notas del script de HaxOle para oficiales."
+    short: "Muestra el script oficial para descargar.",
+    detail: "Elegí Futsal o Real Soccer y descargá la versión ofuscada de tu liga. Solo admins."
   },
   validarauth: {
     usage: "/validarauth auth:xxxx razon:xxxx",
@@ -131,9 +131,14 @@ const COMMANDS = {
     detail: "Requiere admin. Recorre los clubes habilitados, corrige plantillas y vuelve a guardar la relacion con Supabase."
   },
   eliminartorneo: {
-    usage: "/eliminartorneo modalidad:x3 torneo:Liga T3",
-    short: "Elimina un torneo y sus partidos.",
-    detail: "Requiere admin."
+    usage: "/borrartorneo",
+    short: "Abre la lista de torneos para borrar uno vacío.",
+    detail: "Requiere admin. No borra partidos ni historial. /eliminartorneo funciona igual."
+  },
+  borrarclub: {
+    usage: "/borrarclub",
+    short: "Abre la lista de clubes para dar uno de baja.",
+    detail: "Requiere admin. Conserva resultados en torneos finalizados y no borra clubes con partidos activos."
   },
   vincularinformes: {
     aliases: ["vininformes"],
@@ -149,9 +154,9 @@ const COMMANDS = {
   },
   deshabilitarclub: {
     aliases: ["d", "deshabilitar"],
-    usage: "!d Club x3,x4",
+    usage: "!d Club x3,x4 sancionar:si",
     short: "Deshabilita un club o algunas modalidades.",
-    detail: "Borra roles, desvincula foros y archiva el club."
+    detail: "Borra roles y desvincula foros. Marcar como sanción es opcional; por defecto, no."
   },
   foroclub: {
     aliases: ["fc"],
@@ -320,7 +325,7 @@ module.exports = {
     if (admin) {
       sections.push({
         title: "Admin",
-        body: asCommandList(["instalacion", "server", "agregarmodalidad", "configuracion", "habilitarclub/!h", "habilitarclub/!hc", "entry/!e", "left/!left", "creartorneo", "refresh/!refresh", "eliminartorneo", "vincularinformes", "cargarstat/!cargarstat", "deshabilitarclub/!d", "foroclub/!fc", "clear", "limit", "mercado", "sancionar", "clearsancion", "script/!script", "validarauth", "auths/!auths", "eliminarauth", "purge", "lock", "unlock", "prefixchange", "tiers/!tier"])
+        body: asCommandList(["instalacion", "server", "agregarmodalidad", "configuracion", "habilitarclub/!h", "habilitarclub/!hc", "entry/!e", "left/!left", "creartorneo", "refresh/!refresh", "eliminartorneo", "borrarclub", "vincularinformes", "cargarstat/!cargarstat", "deshabilitarclub/!d", "foroclub/!fc", "clear", "limit", "mercado", "sancionar", "clearsancion", "script/!script", "validarauth", "auths/!auths", "eliminarauth", "purge", "lock", "unlock", "prefixchange", "tiers/!tier"])
       });
     }
 

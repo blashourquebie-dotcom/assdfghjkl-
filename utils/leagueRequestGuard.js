@@ -53,6 +53,12 @@ async function guard(path, options, read) {
       for (const row of rows(body?.p_rows)) {
         if (row.torneo_id && row.torneo_id !== body.p_tournament) deny();
       }
+    } else if (path === 'rpc/bot_archive_club') {
+      if (body?.p_guild !== guild) deny();
+      const found = await readAll('clubes', { id: 'eq.' + body?.p_id }, 'id,nombre');
+      if (found.length !== 1 || found[0].nombre !== body?.p_expected_name) deny();
+      const cfg = require('./database').readConfig();
+      if (!Object.keys(cfg.clubs || {}).some(name => name.toLowerCase() === found[0].nombre.toLowerCase())) deny('El club no está habilitado en este servidor.');
     } else if (path === 'rpc/publish_approved_report') {
       const match = await assertMatch(body?.p_match_id);
       for (const row of rows(body?.p_stats)) {

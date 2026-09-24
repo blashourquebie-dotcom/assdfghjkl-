@@ -7,7 +7,7 @@ module.exports = {
     .setName("eliminartorneo")
     .setDescription("Alias de /borrartorneo: solo torneos vacíos, con confirmación")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption((option) => option.setName("modalidad").setDescription("Modalidad del torneo").setRequired(true))
-    .addStringOption((option) => option.setName("torneo").setDescription("Nombre exacto del torneo").setRequired(true)),
+    .addStringOption((option) => option.setName('liga').setDescription('Solo en PRUEBAS: liga a administrar').setRequired(false)
+      .addChoices({ name: 'ASH', value: 'ash' }, { name: 'RoadToGlory', value: 'exclusivo' }, { name: 'Temático', value: 'tematico' })),
   execute: safeDelete.execute
 };

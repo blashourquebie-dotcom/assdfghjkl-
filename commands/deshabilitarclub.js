@@ -37,6 +37,9 @@ const commandData = (name = "deshabilitarclub") =>
         .setName("modalidades")
         .setDescription("Opcional. Ej: x3,x4. Si no se indica, deshabilita todas")
         .setRequired(false)
+    )
+    .addBooleanOption((opt) =>
+      opt.setName("sancionar").setDescription("Marcar la baja como sanción (por defecto, no)").setRequired(false)
     );
 
 const removeUserDataForRole = (users, userId, clubName, modality, roleId, byTag) => {
@@ -103,6 +106,7 @@ const executeDisableClub = async (interaction) => {
 
   const clubQuery = interaction.options.getString("club");
   const modalitiesRaw = interaction.options.getString("modalidades");
+  const sancionar = interaction.options.getBoolean?.("sancionar") === true;
 
   console.log(`[deshabilitarclub] Deshabilitando club ${clubQuery}, modalidades: ${modalitiesRaw || "todas"}`);
 
@@ -234,6 +238,14 @@ const executeDisableClub = async (interaction) => {
 
     const remainingRoles = Object.keys(clubCfg.roles || {});
     const removedEverything = remainingRoles.length === 0;
+    if (sancionar) {
+      cfg.archivedClubs[clubEntry.name].sanctioned = true;
+      cfg.archivedClubs[clubEntry.name].sanctionedAt = new Date().toISOString();
+      cfg.archivedClubs[clubEntry.name].sanctionedBy = interaction.user.id;
+      clubCfg.sanctioned = true;
+      clubCfg.sanctionedAt = cfg.archivedClubs[clubEntry.name].sanctionedAt;
+      clubCfg.sanctionedBy = interaction.user.id;
+    }
     let emojiStatus = "se conserva";
     if (removedEverything) {
       const emojiId = String(clubCfg.emoji || '').match(/<a?:[^:>]+:(\d{15,25})>/)?.[1];
@@ -283,6 +295,7 @@ const executeDisableClub = async (interaction) => {
         { name: "Foros desvinculados", value: String(unlinkedForums.length), inline: true },
         { name: "Club completo", value: removedEverything ? "si" : "no", inline: true }
         ,{ name: "Emoji del servidor", value: emojiStatus, inline: true }
+        ,{ name: "Sanción", value: sancionar ? "sí" : "no", inline: true }
       )
       .setColor(0xe74c3c);
 
