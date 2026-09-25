@@ -6,6 +6,7 @@ const tournamentScope = require('./tournamentScope');
 
 const SUPABASE_URL = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
 const SUPABASE_SERVICE_KEY = String(
+  process.env.SUPABASE_SECRET_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_SERVICE_KEY ||
   process.env.SUPABASE_KEY ||
@@ -18,12 +19,12 @@ let warnedMissingConfig = false;
 const warnIfDisabled = () => {
   if (isEnabled || warnedMissingConfig) return;
   warnedMissingConfig = true;
-  console.warn("[haxoleSupabase] Integracion desactivada: faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY.");
+  console.warn("[haxoleSupabase] Integracion desactivada: faltan SUPABASE_URL o SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY.");
 };
 
 const headers = () => ({
   apikey: SUPABASE_SERVICE_KEY,
-  Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+  ...(!SUPABASE_SERVICE_KEY.startsWith('sb_secret_') ? { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } : {}),
   "Content-Type": "application/json",
   Prefer: "return=representation"
 });
