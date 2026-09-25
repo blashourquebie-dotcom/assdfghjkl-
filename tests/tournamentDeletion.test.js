@@ -26,12 +26,12 @@ const useListedTournament = async (fn) => {
   try { return await fn(); } finally { db.request = original; }
 };
 
-test('/borrartorneo muestra lista, pero no confirma un torneo con partidos', async () => {
+test('/borrartorneo permite confirmar un torneo aunque tenga partidos', async () => {
   const originalInspect = db.inspectTournamentRemoval;
   const originalRemove = db.removeTournament;
   let deleted = false;
   try {
-    db.inspectTournamentRemoval = async () => ({ torneo: { id: 't1', nombre: 'LIGA DUPLICADA' }, blockers: ['partidos'] });
+    db.inspectTournamentRemoval = async () => ({ torneo: { id: 't1', nombre: 'LIGA DUPLICADA' } });
     db.removeTournament = async () => { deleted = true; };
     await useListedTournament(async () => {
       const interaction = makeInteraction();
@@ -39,8 +39,8 @@ test('/borrartorneo muestra lista, pero no confirma un torneo con partidos', asy
       const menu = interaction.replies.at(-1).components[0].components[0];
       const [, , token] = menu.data.custom_id.split(':');
       await command.handleSelect(interaction, ['choose', token]);
-      assert.match(interaction.replies.at(-1).content, /tiene partidos/);
-      assert.deepEqual(interaction.replies.at(-1).components, []);
+      assert.match(interaction.replies.at(-1).content, /Se eliminarán sus partidos/);
+      assert.equal(interaction.replies.at(-1).components.length, 1);
     });
     assert.equal(deleted, false);
   } finally { db.inspectTournamentRemoval = originalInspect; db.removeTournament = originalRemove; }

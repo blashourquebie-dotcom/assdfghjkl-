@@ -7,7 +7,7 @@ const sessions = new Map();
 const TIMEOUT_MS = 5 * 60 * 1000;
 const data = new SlashCommandBuilder()
   .setName('borrartorneo')
-  .setDescription('Elegí de una lista un torneo vacío para borrar')
+  .setDescription('Elegí un torneo para borrarlo con sus partidos y estadísticas')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption((option) => option.setName('liga').setDescription('Solo en PRUEBAS: liga a administrar').setRequired(false)
     .addChoices({ name: 'ASH', value: 'ash' }, { name: 'RoadToGlory', value: 'exclusivo' }, { name: 'Temático', value: 'tematico' }));
@@ -29,7 +29,7 @@ function selection(session, token) {
     new ButtonBuilder().setCustomId(`borrartorneo:page:prev:${token}`).setLabel('Anterior').setStyle(ButtonStyle.Secondary).setDisabled(session.page === 0),
     new ButtonBuilder().setCustomId(`borrartorneo:page:next:${token}`).setLabel('Siguiente').setStyle(ButtonStyle.Secondary).setDisabled(start + 25 >= session.rows.length)
   ));
-  return { content: `Elegí el torneo de esta liga que querés borrar. Solo se pueden borrar torneos vacíos. Página ${session.page + 1}/${Math.ceil(session.rows.length / 25)}.`, components };
+  return { content: `Elegí el torneo de esta liga que querés borrar. Página ${session.page + 1}/${Math.ceil(session.rows.length / 25)}.`, components };
 }
 
 async function execute(interaction) {
@@ -64,9 +64,8 @@ async function handleSelect(interaction, [action, token]) {
   try {
     const inspected = await inSessionScope(interaction, session, () => db.inspectTournamentRemoval({ modality: row.modality, name: row.nombre }));
     if (!inspected || inspected.torneo.id !== row.id) throw new Error('El torneo cambió. Volvé a abrir la lista.');
-    if (inspected.blockers.length) return interaction.editReply({ content: `No se puede borrar **${row.nombre}**: tiene ${inspected.blockers.join(', ')}.`, components: [] });
     session.selected = row;
-    return interaction.editReply({ content: `¿Borrar **${row.nombre}** (${row.modality})? No tiene partidos, inscripciones ni historial vinculado.`, components: [new ActionRowBuilder().addComponents(
+    return interaction.editReply({ content: `¿Borrar definitivamente **${row.nombre}** (${row.modality})? Se eliminarán sus partidos, resultados, estadísticas, fixture e inscripciones.`, components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`borrartorneo:confirm:${token}`).setLabel('Sí, borrar torneo').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`borrartorneo:cancel:${token}`).setLabel('Cancelar').setStyle(ButtonStyle.Secondary)
     )] });

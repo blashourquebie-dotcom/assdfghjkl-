@@ -506,30 +506,14 @@ const inspectTournamentRemoval = async ({ modality, name }) => {
   if (tournamentResult.data.length > 1) throw new Error("Hay más de un torneo con ese nombre en la liga. No se borró nada.");
   const torneo = tournamentResult.data[0];
   if (!torneo) return null;
-  const references = [
-    ["partidos", { torneo_id: `eq.${torneo.id}` }, "partidos"],
-    ["torneo_clubes", { torneo_id: `eq.${torneo.id}` }, "clubes inscriptos"],
-    ["tournament_round_schedule", { torneo_id: `eq.${torneo.id}` }, "rondas programadas"],
-    ["fixture_delete_requests", { torneo_id: `eq.${torneo.id}` }, "solicitudes de fixture"],
-    ["jugador_aliases", { first_torneo_id: `eq.${torneo.id}` }, "historial de jugadores"],
-    ["jugador_aliases", { last_torneo_id: `eq.${torneo.id}` }, "historial de jugadores"]
-  ];
-  const blockers = new Set();
-  for (const [table, filters, label] of references) {
-    const result = await selectRows(table, { ...filters, limit: 1 });
-    if (!result.ok && result.status === 404) continue; // Older deployments may lack optional tables.
-    if (!result.ok || !Array.isArray(result.data)) throw new Error(`No pude comprobar ${label}. No se borró nada.`);
-    if (result.data.length) blockers.add(label);
-  }
-  return { torneo, blockers: [...blockers] };
+  return { torneo };
 };
 
 const removeTournament = async ({ modality, name }) => {
   const inspected = await inspectTournamentRemoval({ modality, name });
   if (!inspected) return null;
-  if (inspected.blockers.length) throw new Error(`El torneo tiene ${inspected.blockers.join(", ")}. No se borró nada.`);
-  const removed = await request("rpc/bot_delete_empty_tournament", { method: "POST", body: { p_id: inspected.torneo.id, p_expected_name: inspected.torneo.nombre, p_tipo: tournamentScope.currentLeague() } });
-  if (!removed.ok) throw new Error(removed.status === 404 ? "Falta aplicar la migración de borrado seguro en Supabase. No se borró nada." : `No se pudo borrar el torneo: ${removed.error || removed.status}`);
+  const removed = await request("rpc/bot_delete_tournament", { method: "POST", body: { p_id: inspected.torneo.id, p_expected_name: inspected.torneo.nombre, p_tipo: tournamentScope.currentLeague() } });
+  if (!removed.ok) throw new Error(removed.status === 404 ? "Falta aplicar la migración de borrado de torneos en Supabase. No se borró nada." : `No se pudo borrar el torneo: ${removed.error || removed.status}`);
   if (removed.data !== true) throw new Error("El torneo cambió o ya no existe. No se borró nada.");
   const remaining = await selectRows("torneos", { id: `eq.${inspected.torneo.id}` });
   if (!remaining.ok || !Array.isArray(remaining.data) || remaining.data.length) throw new Error("No pude confirmar el borrado del torneo. Revisá Supabase antes de reintentar.");
