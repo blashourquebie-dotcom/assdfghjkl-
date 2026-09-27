@@ -46,12 +46,12 @@ test('Kyu owner server and commands work before OAuth setup without granting app
     assert.equal(kyu.canStayInGuild(id), true);
     assert.equal(kyu.isGuild(id), true);
     assert.equal(kyu.config.enabled, false, 'app login remains disabled');
-    assert.equal(kyu.commandsFor(id).length, 7);
+    assert.equal(kyu.commandsFor(id).length, 8);
     assert.equal(kyu.canStayInGuild('999999999999999999'), false);
   }
   const active = createIntegration({ KYU_ENABLED: '1' });
   assert.equal(active.isGuild(id), true);
-  assert.equal(active.commandsFor(id).length, 7);
+  assert.equal(active.commandsFor(id).length, 8);
   assert.equal(require('../utils/tournamentScope').allowedGuild(id), false);
   assert.equal(require('../utils/tournamentScope').leagueForGuild(id), null);
   const overridden = createIntegration({ KYU_ENABLED: '1', KYU_GUILD_ID: '123456789012345678' });
@@ -69,7 +69,7 @@ test('existing credentials map without changing league scope; public URL must be
   const kyu = createIntegration({ KYU_ENABLED: '1', KYU_GUILD_ID: '123456789012345678' });
   assert.equal(kyu.isGuild('123456789012345678'), true);
   assert.equal(kyu.commandsFor('another').length, 0);
-  assert.equal(kyu.commandsFor('123456789012345678').length, 7);
+  assert.equal(kyu.commandsFor('123456789012345678').length, 8);
   assert.equal(require('../utils/tournamentScope').allowedGuild('123456789012345678'), false);
 });
 

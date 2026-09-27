@@ -3,7 +3,8 @@ const commands=[
  {name:'instalaciónkyu',description:'Crea los roles jugador Kyu, Pro y Pro+.'},
  {name:'plan',description:'Asigna un plan con vencimiento.',options:[opt('usuario','Jugador',6),opt('plan','Plan',3,true,{choices:[{name:'Pro',value:'pro'},{name:'Pro+',value:'proplus'}]}),opt('tiempo','Ejemplo: 30d, 12h, 4w',3)]},
  {name:'planremove',description:'Retira el plan y el acceso concedido por el bot.',options:[opt('usuario','Jugador',6)]},
- {name:'jugadores',description:'Vincula un canal o hilo a la presencia en vivo.',options:[opt('canal','Canal o hilo',7)]},
+ {name:'jugadores',description:'Vincula un canal o hilo para registrar entradas a KyuApp.',options:[opt('canal','Canal o hilo',7)]},
+ {name:'logplanes',description:'Vincula el canal de registros de planes y administradores.',options:[opt('canal','Canal o hilo',7)]},
  {name:'ticket',description:'Publica el panel de atención de KyuApp.'},
  {name:'ticketcerrar',description:'Cierra el ticket actual sin borrar su historial.'},
  {name:'cv',description:'Crea un canal de voz privado para vos y staff.',options:[opt('nombre','Nombre del canal',3)]}
