@@ -38,6 +38,27 @@ async function listener(t, integration) {
 }
 const post = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
+test('Kyu owner server stays without environment setup; membership grants no access or league rights', () => {
+  const id = '1510011417712132117';
+  for (const env of [{}, { KYU_ENABLED: '0' }]) {
+    const kyu = createIntegration(env);
+    assert.equal(kyu.config.env.DISCORD_GUILD_ID, id);
+    assert.equal(kyu.canStayInGuild(id), true);
+    assert.equal(kyu.isGuild(id), false);
+    assert.deepEqual(kyu.commandsFor(id), []);
+    assert.equal(kyu.canStayInGuild('999999999999999999'), false);
+  }
+  const active = createIntegration({ KYU_ENABLED: '1' });
+  assert.equal(active.isGuild(id), true);
+  assert.equal(active.commandsFor(id).length, 7);
+  assert.equal(require('../utils/tournamentScope').allowedGuild(id), false);
+  assert.equal(require('../utils/tournamentScope').leagueForGuild(id), null);
+  const overridden = createIntegration({ KYU_ENABLED: '1', KYU_GUILD_ID: '123456789012345678' });
+  assert.equal(overridden.canStayInGuild('123456789012345678'), true);
+  assert.equal(overridden.canStayInGuild(id), true);
+  assert.equal(overridden.isGuild(id), false, 'explicit configuration still controls OAuth/commands');
+});
+
 test('existing credentials map without changing league scope; public URL must be an HTTPS origin', () => {
   const cfg = configuration({ CLIENT_ID: 'current', DISCORD_CLIENT_ID: 'other', TOKEN: 'current-token', KYU_CLIENT_SECRET: 'secret', KYU_PUBLIC_URL: 'https://example.invalid/' });
   assert.equal(cfg.env.DISCORD_CLIENT_ID, 'current');

@@ -2,6 +2,8 @@
 
 La integración está en `utils/kyuApp.js` y `utils/kyu-backend/`. Comparte el servidor HTTP y el puerto del bot; no inicia un segundo bot ni reemplaza los comandos de liga. Se activa únicamente con `KYU_ENABLED=1` y para el servidor configurado. No se ha desplegado desde esta carpeta.
 
+El servidor KyuApp `1510011417712132117` está autorizado directamente en el código: el bot permanece allí aunque todavía no se configure OAuth ni `KYU_ENABLED`. También es el ID predeterminado si no se establece `KYU_GUILD_ID`. Esto no habilita funciones de liga ni permite entrar a la app sin Discord/rol. Para que el bot deje de salirse, hay que desplegar este código e invitarlo de nuevo; la configuración siguiente habilita el login y los comandos Kyu.
+
 ## 1. Variables del servicio Railway que ya ejecuta este bot
 
 Conservá las variables actuales (Supabase, TOKEN, CLIENT_ID, etc.). Agregá:

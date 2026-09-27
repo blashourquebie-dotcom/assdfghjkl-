@@ -2,6 +2,7 @@ const path = require('node:path');
 const { createService } = require('./kyu-backend/server.cjs');
 const { commands } = require('./kyu-backend/commands.cjs');
 const names = new Set(commands.map(c => c.name));
+const KYU_GUILD_ID = '1510011417712132117';
 
 function configuration(env = process.env) {
   const publicUrl = (env.KYU_PUBLIC_URL || env.PUBLIC_URL || '').replace(/\/+$/, '');
@@ -12,7 +13,7 @@ function configuration(env = process.env) {
     DISCORD_BOT_TOKEN: env.TOKEN || env.DISCORD_BOT_TOKEN || '',
     DISCORD_CLIENT_SECRET: env.KYU_CLIENT_SECRET || env.DISCORD_CLIENT_SECRET || '',
     DISCORD_PUBLIC_KEY: env.DISCORD_PUBLIC_KEY || '',
-    DISCORD_GUILD_ID: env.KYU_GUILD_ID || env.DISCORD_GUILD_ID || '',
+    DISCORD_GUILD_ID: env.KYU_GUILD_ID || env.DISCORD_GUILD_ID || KYU_GUILD_ID,
     PUBLIC_URL: validUrl ? publicUrl : '',
     KYU_PLAYER_ROLE_ID: env.KYU_PLAYER_ROLE_ID || '',
     KYU_PRO_ROLE_ID: env.KYU_PRO_ROLE_ID || '',
@@ -29,6 +30,9 @@ function createIntegration(env = process.env, transport = fetch) {
   let service, timer;
   function getService() { return service || (service = createService(config.env, transport)); }
   function isGuild(id) { return config.enabled && !!config.env.DISCORD_GUILD_ID && String(id) === config.env.DISCORD_GUILD_ID; }
+  // Membership is independent of OAuth activation: keep the owner's server
+  // while credentials are being configured, without granting league/access rights.
+  function canStayInGuild(id) { return String(id) === KYU_GUILD_ID || isGuild(id); }
   function route(req, res) {
     const route = new URL(req.url || '/', 'http://localhost').pathname;
     if (!['/health', '/kyu/health', '/auth/start', '/auth/callback'].includes(route) && !route.startsWith('/v1/')) return false;
@@ -74,8 +78,8 @@ function createIntegration(env = process.env, transport = fetch) {
     }
     return true;
   }
-  return { config, route, isGuild, start, handles, interaction, commandsFor: id => isGuild(id) ? commands : [], close() { clearInterval(timer); timer = null; } };
+  return { config, route, isGuild, canStayInGuild, start, handles, interaction, commandsFor: id => isGuild(id) ? commands : [], close() { clearInterval(timer); timer = null; } };
 }
 let instance;
 const current = () => instance || (instance = createIntegration());
-module.exports = { configuration, createIntegration, route: (...a) => current().route(...a), isGuild: id => current().isGuild(id), start: () => current().start(), handles: i => current().handles(i), interaction: i => current().interaction(i), commandsFor: id => current().commandsFor(id) };
+module.exports = { configuration, createIntegration, route: (...a) => current().route(...a), isGuild: id => current().isGuild(id), canStayInGuild: id => current().canStayInGuild(id), start: () => current().start(), handles: i => current().handles(i), interaction: i => current().interaction(i), commandsFor: id => current().commandsFor(id) };
