@@ -47,12 +47,16 @@ module.exports = async (client) => {
   const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
   try {
-    const guilds = Array.from(client.guilds.cache.values()).filter(guild => require('../utils/tournamentScope').allowedGuild(guild.id));
+    const kyu = require('../utils/kyuApp');
+    const guilds = Array.from(client.guilds.cache.values()).filter(guild => require('../utils/tournamentScope').allowedGuild(guild.id) || kyu.isGuild(guild.id));
     console.log(`Registrando ${commands.length} comando(s) en ${guilds.length} servidor(es)...`);
 
     for (const guild of guilds) {
+      const leagueCommands = require('../utils/tournamentScope').allowedGuild(guild.id) ? commands : [];
+      const kyuCommands = kyu.commandsFor(guild.id);
+      if (kyuCommands.some(c => leagueCommands.some(existing => existing.name === c.name))) throw new Error('Hay un comando Kyu que colisiona con uno de la liga; no se sobreescribirá.');
       await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.id), {
-        body: commands
+        body: [...leagueCommands, ...kyuCommands]
       });
       console.log(`Comandos registrados en ${guild.name} (${guild.id})`);
     }

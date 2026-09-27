@@ -209,7 +209,7 @@ const startBot = async () => {
 
   client.once("ready", async () => {
     for (const guild of client.guilds.cache.values()) {
-      if (!require('./utils/tournamentScope').allowedGuild(guild.id)) {
+      if (!require('./utils/tournamentScope').allowedGuild(guild.id) && !require('./utils/kyuApp').isGuild(guild.id)) {
         await guild.leave().catch(error => console.error('No se pudo salir del servidor no autorizado:', guild.id, error.message));
       }
     }
@@ -264,6 +264,10 @@ const startBot = async () => {
   });
   require("./handlers/reportApprovalHandler")(client);
   client.on("guildCreate", async guild => {
+    if (require('./utils/kyuApp').isGuild(guild.id) && !require('./utils/tournamentScope').allowedGuild(guild.id)) {
+      await commandHandler(client);
+      return; // Do not initialize league roles/rosters in a Kyu-only server.
+    }
     if (!require('./utils/tournamentScope').allowedGuild(guild.id)) {
       await guild.leave().catch(error => console.error('No se pudo salir del servidor no autorizado:', guild.id, error.message));
       return;

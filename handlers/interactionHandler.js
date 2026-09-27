@@ -80,6 +80,12 @@ const protectLongInteraction = (interaction) => {
 
 module.exports = (client) => {
   client.on("interactionCreate", async (interaction) => {
+    // Kyu permissions are separate from delegated league permissions.
+    const kyu = require('../utils/kyuApp');
+    if (kyu.handles(interaction)) {
+      try { return await kyu.interaction(interaction); }
+      catch (error) { return safeErrorReply(interaction, 'No se pudo completar la acción de KyuApp.'); }
+    }
     const guildId = interaction.guild?.id || interaction.guildId || null;
     // Only identity confirmation buttons are allowed in DMs; never route league commands there.
     if (!guildId && interaction.isButton?.() && /^validarauth:(confirm|reject):[^:]+$/.test(interaction.customId || "")) {

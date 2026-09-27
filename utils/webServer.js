@@ -121,6 +121,9 @@ const startWebServer = async (client) => {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const pathname = decodeURIComponent(url.pathname);
 
+      // Kyu OAuth/pairing uses its own validation and headers, before generic web CORS.
+      if (require('./kyuApp').route(req, res)) return;
+
       Object.entries(corsHeaders()).forEach(([key, value]) => res.setHeader(key, value));
 
       if (req.method === "OPTIONS") {
@@ -357,6 +360,7 @@ const startWebServer = async (client) => {
   });
 
   global.__haxoleWebServer = server;
+  require('./kyuApp').start();
   console.log(`Web activa en http://${HOST}:${PORT} (root: ${WEB_ROOT})`);
   return server;
 };

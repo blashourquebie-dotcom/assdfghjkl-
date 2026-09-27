@@ -2,3 +2,5 @@
 node_modules
 dist
 .vercel
+data/kyu-app.json
+data/kyu-app.json.tmp
