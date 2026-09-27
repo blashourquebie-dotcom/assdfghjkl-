@@ -3,8 +3,11 @@ const { createService } = require('./kyu-backend/server.cjs');
 const { commands } = require('./kyu-backend/commands.cjs');
 const names = new Set(commands.map(c => c.name));
 const KYU_GUILD_ID = '1510011417712132117';
+const KYU_ROLES = { player: '1553753550251622550', pro: '1553753551187091546', proplus: '1553753552080343162' };
 
 function configuration(env = process.env) {
+  const guildId = String(env.KYU_GUILD_ID || env.DISCORD_GUILD_ID || KYU_GUILD_ID).trim();
+  const defaults = guildId === KYU_GUILD_ID ? KYU_ROLES : {};
   const publicUrl = (env.KYU_PUBLIC_URL || env.PUBLIC_URL || '').replace(/\/+$/, '');
   let validUrl = false;
   try { const u = new URL(publicUrl); validUrl = u.protocol === 'https:' && u.origin === publicUrl; } catch {}
@@ -13,11 +16,11 @@ function configuration(env = process.env) {
     DISCORD_BOT_TOKEN: env.TOKEN || env.DISCORD_BOT_TOKEN || '',
     DISCORD_CLIENT_SECRET: env.KYU_CLIENT_SECRET || env.DISCORD_CLIENT_SECRET || '',
     DISCORD_PUBLIC_KEY: env.DISCORD_PUBLIC_KEY || '',
-    DISCORD_GUILD_ID: env.KYU_GUILD_ID || env.DISCORD_GUILD_ID || KYU_GUILD_ID,
+    DISCORD_GUILD_ID: guildId,
     PUBLIC_URL: validUrl ? publicUrl : '',
-    KYU_PLAYER_ROLE_ID: env.KYU_PLAYER_ROLE_ID || '',
-    KYU_PRO_ROLE_ID: env.KYU_PRO_ROLE_ID || '',
-    KYU_PRO_PLUS_ROLE_ID: env.KYU_PRO_PLUS_ROLE_ID || '',
+    KYU_PLAYER_ROLE_ID: String(env.KYU_PLAYER_ROLE_ID || '').trim() || defaults.player || '',
+    KYU_PRO_ROLE_ID: String(env.KYU_PRO_ROLE_ID || '').trim() || defaults.pro || '',
+    KYU_PRO_PLUS_ROLE_ID: String(env.KYU_PRO_PLUS_ROLE_ID || '').trim() || defaults.proplus || '',
     KYU_STREAMER_ROLE_IDS: env.KYU_STREAMER_ROLE_IDS || '',
     KYU_STAFF_ROLE_ID: env.KYU_STAFF_ROLE_ID || '',
     DATA_FILE: env.KYU_DATA_FILE || path.resolve(__dirname, '../data/kyu-app.json')

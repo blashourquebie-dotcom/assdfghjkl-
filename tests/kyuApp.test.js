@@ -126,7 +126,7 @@ test('no Kyu role means no login token', async t => {
 });
 
 test('gateway commands enforce real Discord permissions and isolate the configured guild', async t => {
-  const { integration, state, env } = setup(t, { KYU_ENABLED: undefined, KYU_GUILD_ID: undefined, KYU_CLIENT_SECRET: '', KYU_PUBLIC_URL: '' });
+  const { integration, state, env } = setup(t, { KYU_ENABLED: undefined, KYU_GUILD_ID: undefined, KYU_CLIENT_SECRET: '', KYU_PUBLIC_URL: '', KYU_PRO_ROLE_ID: 'pro', KYU_PRO_PLUS_ROLE_ID: 'proplus' });
   const guildId = '1510011417712132117';
   function interaction(guildId, permissions) {
     const results = [];
@@ -146,4 +146,31 @@ test('gateway commands enforce real Discord permissions and isolate the configur
   assert.equal(allowed.results[0].flags, 64);
   assert.deepEqual(allowed.results[1].allowedMentions, { parse: [] });
   assert.equal(JSON.parse(fs.readFileSync(env.KYU_DATA_FILE)).roles.playerRole, 'player');
+});
+
+test('owner role IDs are scoped to Kyu, with explicit environment overrides', () => {
+  const cfg=configuration({}).env;
+  assert.equal(cfg.KYU_PLAYER_ROLE_ID,'1553753550251622550');
+  assert.equal(cfg.KYU_PRO_ROLE_ID,'1553753551187091546');
+  assert.equal(cfg.KYU_PRO_PLUS_ROLE_ID,'1553753552080343162');
+  assert.equal(configuration({KYU_PLAYER_ROLE_ID:' other-role '}).env.KYU_PLAYER_ROLE_ID,'other-role');
+  assert.equal(configuration({KYU_GUILD_ID:'another'}).env.KYU_PLAYER_ROLE_ID,'');
+});
+
+test('real Kyu role IDs authenticate despite stale saved roles; stale IDs no longer grant access', async t => {
+  const { integration, state, env }=setup(t,{KYU_GUILD_ID:'1510011417712132117',KYU_PLAYER_ROLE_ID:undefined});
+  fs.writeFileSync(env.KYU_DATA_FILE,JSON.stringify({roles:{playerRole:'obsolete-player',pro:'obsolete-pro',guild:'wrong-guild'}}));
+  state.roles=['1553753550251622550'];
+  const request=await listener(t,integration);
+  const pair=await(await request('/v1/pair',post({}))).json();
+  const start=await request('/auth/start?pair='+pair.id,{redirect:'manual'});
+  const callback='/auth/callback?code=test&state='+new URL(start.headers.get('location')).searchParams.get('state');
+  assert.equal((await request(callback,{headers:{cookie:start.headers.get('set-cookie').split(';')[0]}})).status,200);
+  const session=await(await request('/v1/pair/status',post(pair))).json();
+  assert.equal(session.user.allowed,true);
+  assert.ok(state.calls.some(c=>c.url.includes('/guilds/1510011417712132117/members/')));
+  state.roles=['obsolete-player','1553753551187091546','1553753552080343162'];
+  const revoked=await request('/v1/me',{headers:{Authorization:'Bearer '+session.token}});
+  assert.equal(revoked.status,403);
+  assert.match((await revoked.json()).error,/1553753550251622550/);
 });

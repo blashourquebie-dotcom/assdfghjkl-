@@ -5,11 +5,19 @@ function createService(env=process.env,transport=fetch){
  const cfg={guild:env.DISCORD_GUILD_ID,playerRole:env.KYU_PLAYER_ROLE_ID,pro:env.KYU_PRO_ROLE_ID,proplus:env.KYU_PRO_PLUS_ROLE_ID,streamerRoles:(env.KYU_STREAMER_ROLE_IDS||'').split(',').map(s=>s.trim()).filter(Boolean)};
  const dataFile=path.resolve(env.DATA_FILE||'data/kyu.json');let db={users:{},plans:{},friends:[],tickets:{},voices:{},roles:{},presence:null};
  try{db={...db,...JSON.parse(fs.readFileSync(dataFile,'utf8'))};}catch(e){if(e.code!=='ENOENT')throw e;}
- Object.assign(cfg,db.roles);const save=()=>{fs.mkdirSync(path.dirname(dataFile),{recursive:true});fs.writeFileSync(dataFile+'.tmp',JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(dataFile+'.tmp',dataFile)};
+ // Explicit deployment role IDs take precedence over persisted installation data.
+ // Never allow a stored roles object to override the guild or streamer policy.
+ for(const key of ['playerRole','pro','proplus'])cfg[key]=String(cfg[key]||'').trim()||String(db.roles?.[key]||'').trim();
+ const save=()=>{fs.mkdirSync(path.dirname(dataFile),{recursive:true});fs.writeFileSync(dataFile+'.tmp',JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(dataFile+'.tmp',dataFile)};
  const pairs=new Map(),states=new Map(),sessions=new Map(),rates=new Map(),seenInteractions=new Map();
  const ready=()=>!!(env.DISCORD_CLIENT_ID&&env.DISCORD_CLIENT_SECRET&&env.DISCORD_BOT_TOKEN&&cfg.guild&&env.PUBLIC_URL);
  async function discord(route,method='GET',body,auth='Bot '+env.DISCORD_BOT_TOKEN){const r=await transport('https://discord.com/api/v10'+route,{method,headers:{Authorization:auth,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(12000)});if(!r.ok)throw new Error('Discord no disponible o permisos insuficientes ('+r.status+').');return r.status===204?null:r.json();}
- async function identity(id){const member=await discord(`/guilds/${cfg.guild}/members/${id}`);const rights=authorize(member,cfg);if(!rights.allowed)throw new Error('Necesitás el rol jugador Kyu para acceder.');return {id,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,...rights};}
+ async function identity(id){
+  if(!cfg.playerRole)throw new Error('El bot todavía no tiene configurado el ID del rol Kyu. Un administrador debe ejecutar /instalaciónkyu y guardar KYU_PLAYER_ROLE_ID en Railway.');
+  const member=await discord(`/guilds/${cfg.guild}/members/${id}`);const rights=authorize(member,cfg);
+  if(!rights.allowed)throw new Error(`La cuenta ${member.user?.username||id} no tiene el rol Kyu configurado (ID ${cfg.playerRole}) en el servidor ${cfg.guild}. Si ya tenés el rol kyu, revisá su ID en KYU_PLAYER_ROLE_ID; el nombre no alcanza.`);
+  return {id,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,...rights};
+ }
  async function session(req){const credential=(req.headers.authorization||'').replace(/^Bearer /,'');const key=hash(credential);const s=sessions.get(key);if(!s||s.expires<Date.now()){sessions.delete(key);throw new Error('Sesión vencida. Volvé a vincular Discord.');}try{s.user=await identity(s.user.id);}catch(e){sessions.delete(key);throw e;}return s;}
  const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value))};
  async function read(req){let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>32768)throw new Error('Solicitud demasiado grande.');chunks.push(c)}return Buffer.concat(chunks);}
@@ -27,7 +35,18 @@ function createService(env=process.env,transport=fetch){
    db.tickets[channel.id]={channel:channel.id,user,kind,closed:false};save();await discord(`/channels/${channel.id}/messages`,'POST',{content:`<@${user}> · ${kind}\nUn miembro de soporte te atenderá. Usá /ticketcerrar al terminar.`,allowed_mentions:{users:[user]}});return {content:`Tu ticket: <#${channel.id}>`};
   }
   if(name==='instalaciónkyu'){
-   const roles=await discord(`/guilds/${cfg.guild}/roles`);for(const [key,label] of [['playerRole','kyu'],['pro','pro'],['proplus','pro+']]){let r=roles.find(r=>r.id===cfg[key])||roles.find(r=>r.name===label);if(!r)r=await discord(`/guilds/${cfg.guild}/roles`,'POST',{name:label,color:0xffadd0,permissions:'0',mentionable:false});cfg[key]=r.id;}db.roles={playerRole:cfg.playerRole,pro:cfg.pro,proplus:cfg.proplus};save();return {content:'Roles Kyu, Pro y Pro+ configurados. El bot debe estar por encima de ellos.'};
+   const roles=await discord(`/guilds/${cfg.guild}/roles`);
+   const definitions=[['playerRole','kyu','KYU_PLAYER_ROLE_ID'],['pro','pro','KYU_PRO_ROLE_ID'],['proplus','pro+','KYU_PRO_PLUS_ROLE_ID']];
+   const selected=definitions.map(([key,label,variable])=>{
+    const explicit=String(env[variable]||'').trim();
+    if(explicit){const r=roles.find(r=>r.id===explicit);if(!r)throw new Error(`${variable}=${explicit} no corresponde a un rol de este servidor. Corregí ese ID en Railway.`);return r;}
+    const saved=roles.find(r=>r.id===cfg[key]);if(saved)return saved;
+    const matches=roles.filter(r=>r.name.trim().toLowerCase()===label);
+    if(matches.length>1)throw new Error(`Hay varios roles llamados ${label}. Configurá ${variable} con el ID correcto; no se elegirá uno al azar.`);
+    return matches[0];
+   });
+   for(let n=0;n<definitions.length;n++){const [key,label]=definitions[n];const r=selected[n]||await discord(`/guilds/${cfg.guild}/roles`,'POST',{name:label,color:0xffadd0,permissions:'0',mentionable:false});cfg[key]=r.id;}
+   db.roles={playerRole:cfg.playerRole,pro:cfg.pro,proplus:cfg.proplus};save();return {content:`Roles Kyu, Pro y Pro+ configurados. El bot debe estar por encima de ellos.\nPara conservar estos IDs tras un despliegue, guardá en Railway:\nKYU_PLAYER_ROLE_ID=${cfg.playerRole}\nKYU_PRO_ROLE_ID=${cfg.pro}\nKYU_PRO_PLUS_ROLE_ID=${cfg.proplus}\nNo hace falta quitarte ni volver a asignarte un rol que ya tenés.`};
   }
   if(name==='plan'){
    const id=option(i,'usuario'),plan=option(i,'plan'),expires=Date.now()+duration(option(i,'tiempo'));if(!['pro','proplus'].includes(plan)||!cfg[plan]||!cfg.playerRole)throw new Error('Ejecutá /instalaciónkyu primero.');

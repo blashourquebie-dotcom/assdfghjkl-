@@ -13,10 +13,14 @@ KYU_ENABLED=1
 KYU_PUBLIC_URL=https://assdfghjkl-production-9b52.up.railway.app
 KYU_GUILD_ID=1510011417712132117
 KYU_CLIENT_SECRET=CLIENT_SECRET_DE_LA_MISMA_APLICACION_DEL_BOT
-KYU_PLAYER_ROLE_ID=ID_DEL_ROL_KYU
+KYU_PLAYER_ROLE_ID=1553753550251622550
+KYU_PRO_ROLE_ID=1553753551187091546
+KYU_PRO_PLUS_ROLE_ID=1553753552080343162
 ```
 
 Los dos IDs se copian en Discord activando Ajustes → Avanzado → Modo desarrollador, y haciendo clic derecho en el servidor / rol. Si no hay rol Kyu, omití `KYU_PLAYER_ROLE_ID` inicialmente y ejecutá `/instalaciónkyu` después de desplegar. El bot crea o reutiliza `kyu`, `pro` y `pro+`, y guarda sus IDs.
+
+Para el servidor `1510011417712132117`, los tres IDs confirmados arriba ya son valores predeterminados en el código. No hace falta agregarlos como variables si no existen. Si ya configuraste otros IDs en Railway, corregilos o quitá esas variables: los valores explícitos tienen prioridad. El archivo de roles guardados ya no pisa esta configuración. Tener roles con el mismo nombre no alcanza: se verifica el ID exacto, y `/instalaciónkyu` rechaza nombres duplicados ambiguos.
 
 `TOKEN` y `CLIENT_ID` del bot actual se reutilizan. `KYU_CLIENT_SECRET` sale de **OAuth2 → Client Secret de esa misma aplicación** en Discord Developer Portal. No es el Bot Token ni la Public Key. No publiques ninguno de los secretos en GitHub, en el chat ni dentro de KyuApp. No hace falta resetear el token existente.
 
