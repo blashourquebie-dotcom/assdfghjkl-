@@ -1,8 +1,8 @@
 # KyuApp en el bot actual de HAXOLE
 
-La integración está en `utils/kyuApp.js` y `utils/kyu-backend/`. Comparte el servidor HTTP y el puerto del bot; no inicia un segundo bot ni reemplaza los comandos de liga. Se activa únicamente con `KYU_ENABLED=1` y para el servidor configurado. No se ha desplegado desde esta carpeta.
+La integración está en `utils/kyuApp.js` y `utils/kyu-backend/`. Comparte el servidor HTTP y el puerto del bot; no inicia un segundo bot ni reemplaza los comandos de liga. Los comandos Kyu se registran y ejecutan en su servidor aunque falte configurar OAuth. `KYU_ENABLED=1` activa únicamente las rutas de login de la app; no es un requisito para usar `/instalaciónkyu`. No se ha desplegado desde esta carpeta.
 
-El servidor KyuApp `1510011417712132117` está autorizado directamente en el código: el bot permanece allí aunque todavía no se configure OAuth ni `KYU_ENABLED`. También es el ID predeterminado si no se establece `KYU_GUILD_ID`. Esto no habilita funciones de liga ni permite entrar a la app sin Discord/rol. Para que el bot deje de salirse, hay que desplegar este código e invitarlo de nuevo; la configuración siguiente habilita el login y los comandos Kyu.
+El servidor KyuApp `1510011417712132117` está autorizado directamente en el código: el bot permanece allí aunque todavía no se configure OAuth ni `KYU_ENABLED`. También es el ID predeterminado si no se establece `KYU_GUILD_ID`. Esto no habilita funciones de liga ni permite entrar a la app sin Discord/rol. Desplegar este código y reiniciar el bot registra los siete comandos Kyu; no hace falta expulsarlo y volver a invitarlo si ya está en el servidor. Las tareas de vencimiento de planes se mantienen aunque el login esté desactivado.
 
 ## 1. Variables del servicio Railway que ya ejecuta este bot
 

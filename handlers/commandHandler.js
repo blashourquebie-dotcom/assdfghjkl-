@@ -52,13 +52,17 @@ module.exports = async (client) => {
     console.log(`Registrando ${commands.length} comando(s) en ${guilds.length} servidor(es)...`);
 
     for (const guild of guilds) {
-      const leagueCommands = require('../utils/tournamentScope').allowedGuild(guild.id) ? commands : [];
-      const kyuCommands = kyu.commandsFor(guild.id);
-      if (kyuCommands.some(c => leagueCommands.some(existing => existing.name === c.name))) throw new Error('Hay un comando Kyu que colisiona con uno de la liga; no se sobreescribirá.');
-      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.id), {
-        body: [...leagueCommands, ...kyuCommands]
-      });
-      console.log(`Comandos registrados en ${guild.name} (${guild.id})`);
+      try {
+        const leagueCommands = require('../utils/tournamentScope').allowedGuild(guild.id) ? commands : [];
+        const kyuCommands = kyu.commandsFor(guild.id);
+        if (kyuCommands.some(c => leagueCommands.some(existing => existing.name === c.name))) throw new Error('Hay un comando Kyu que colisiona con uno de la liga; no se sobreescribirá.');
+        await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.id), {
+          body: [...leagueCommands, ...kyuCommands]
+        });
+        console.log(`Comandos registrados en ${guild.name} (${guild.id})`);
+      } catch (error) {
+        console.error(`Error al registrar comandos en ${guild.name} (${guild.id}):`, error.message);
+      }
     }
   } catch (error) {
     console.error("Error al registrar comandos:", error);

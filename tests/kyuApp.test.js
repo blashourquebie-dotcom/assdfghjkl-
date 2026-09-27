@@ -38,14 +38,15 @@ async function listener(t, integration) {
 }
 const post = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-test('Kyu owner server stays without environment setup; membership grants no access or league rights', () => {
+test('Kyu owner server and commands work before OAuth setup without granting app access or league rights', () => {
   const id = '1510011417712132117';
   for (const env of [{}, { KYU_ENABLED: '0' }]) {
     const kyu = createIntegration(env);
     assert.equal(kyu.config.env.DISCORD_GUILD_ID, id);
     assert.equal(kyu.canStayInGuild(id), true);
-    assert.equal(kyu.isGuild(id), false);
-    assert.deepEqual(kyu.commandsFor(id), []);
+    assert.equal(kyu.isGuild(id), true);
+    assert.equal(kyu.config.enabled, false, 'app login remains disabled');
+    assert.equal(kyu.commandsFor(id).length, 7);
     assert.equal(kyu.canStayInGuild('999999999999999999'), false);
   }
   const active = createIntegration({ KYU_ENABLED: '1' });
@@ -125,7 +126,8 @@ test('no Kyu role means no login token', async t => {
 });
 
 test('gateway commands enforce real Discord permissions and isolate the configured guild', async t => {
-  const { integration, state, env } = setup(t);
+  const { integration, state, env } = setup(t, { KYU_ENABLED: undefined, KYU_GUILD_ID: undefined, KYU_CLIENT_SECRET: '', KYU_PUBLIC_URL: '' });
+  const guildId = '1510011417712132117';
   function interaction(guildId, permissions) {
     const results = [];
     return { guildId, commandName: 'instalaciónkyu', channelId: 'channel', user: { id: '234567890123456789' }, memberPermissions: { bitfield: permissions }, member: { roles: { cache: new Map() } }, isChatInputCommand: () => true, options: { data: [] }, results,
@@ -134,11 +136,11 @@ test('gateway commands enforce real Discord permissions and isolate the configur
   const foreign = interaction('other', 8n);
   await integration.interaction(foreign);
   assert.match(foreign.results[0].content, /no está habilitado/);
-  const denied = interaction(env.KYU_GUILD_ID, 0n);
+  const denied = interaction(guildId, 0n);
   await integration.interaction(denied);
   assert.match(denied.results[1].content, /Administrar servidor/);
   assert.equal(state.calls.length, 0);
-  const allowed = interaction(env.KYU_GUILD_ID, 32n);
+  const allowed = interaction(guildId, 32n);
   await integration.interaction(allowed);
   assert.match(allowed.results[1].content, /Roles Kyu, Pro y Pro\+ configurados/);
   assert.equal(allowed.results[0].flags, 64);

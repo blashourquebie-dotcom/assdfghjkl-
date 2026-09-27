@@ -29,7 +29,9 @@ function createIntegration(env = process.env, transport = fetch) {
   const config = configuration(env);
   let service, timer;
   function getService() { return service || (service = createService(config.env, transport)); }
-  function isGuild(id) { return config.enabled && !!config.env.DISCORD_GUILD_ID && String(id) === config.env.DISCORD_GUILD_ID; }
+  // Discord commands need the bot token, not the OAuth/login feature switch.
+  // In particular /instalaciónkyu must work before OAuth setup is complete.
+  function isGuild(id) { return !!config.env.DISCORD_GUILD_ID && String(id) === config.env.DISCORD_GUILD_ID; }
   // Membership is independent of OAuth activation: keep the owner's server
   // while credentials are being configured, without granting league/access rights.
   function canStayInGuild(id) { return String(id) === KYU_GUILD_ID || isGuild(id); }
@@ -47,7 +49,8 @@ function createIntegration(env = process.env, transport = fetch) {
     return true;
   }
   function start() {
-    if (!config.enabled || timer) return;
+    // Plans and presence must continue to expire even with app login disabled.
+    if (timer) return;
     getService();
     timer = setInterval(() => getService().tick().catch(() => console.error('[KyuApp] No se pudo actualizar planes/presencia.')), 30000);
     timer.unref();
