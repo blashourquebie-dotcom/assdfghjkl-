@@ -286,23 +286,43 @@ const upsertPlayerIdentity = async ({
     discord_guild_id: `eq.${cleanGuild}`,
     normalized_alias: `eq.${normalizedAlias}`
   });
+  if (!existingAliasResult.ok) {
+    console.warn('[haxoleSupabase] No se pudo consultar el alias:', existingAliasResult.status || existingAliasResult.error);
+    return { player, alias: null, created: !player?.created_at || String(player.created_at) === now };
+  }
   const existingAlias = Array.isArray(existingAliasResult.data) ? existingAliasResult.data[0] || null : null;
 
   let alias = null;
   if (existingAlias?.id) {
-    const updatedAlias = await patchRows("jugador_aliases", { id: `eq.${existingAlias.id}` }, {
-      ...aliasPayload,
-      first_seen_at: existingAlias.first_seen_at || now,
-      seen_count: (Number(existingAlias.seen_count) || 0) + 1
-    });
-    alias = Array.isArray(updatedAlias.data) ? updatedAlias.data[0] || existingAlias : existingAlias;
+    if (existingAlias.jugador_id === player.id) {
+      const updatedAlias = await patchRows("jugador_aliases", { id: `eq.${existingAlias.id}` }, {
+        ...aliasPayload,
+        first_seen_at: existingAlias.first_seen_at || now,
+        seen_count: (Number(existingAlias.seen_count) || 0) + 1
+      });
+      alias = Array.isArray(updatedAlias.data) ? updatedAlias.data[0] || existingAlias : existingAlias;
+    }
   } else {
-    const insertedAlias = await insertRows("jugador_aliases", [{
-      ...aliasPayload,
-      first_seen_at: now,
-      seen_count: 1
-    }]);
-    alias = Array.isArray(insertedAlias.data) ? insertedAlias.data[0] || null : null;
+    const insertedAlias = await request("jugador_aliases", {
+      method: "POST",
+      params: { on_conflict: "discord_guild_id,normalized_alias" },
+      body: [{ ...aliasPayload, first_seen_at: now, seen_count: 1 }],
+      prefer: "resolution=ignore-duplicates,return=representation"
+    });
+    if (insertedAlias.ok) {
+      alias = Array.isArray(insertedAlias.data) ? insertedAlias.data[0] || null : null;
+      // Another event may have inserted the same alias after our SELECT.
+      if (!alias) {
+        const raced = await selectRows("jugador_aliases", {
+          discord_guild_id: `eq.${cleanGuild}`,
+          normalized_alias: `eq.${normalizedAlias}`
+        });
+        const winner = Array.isArray(raced.data) ? raced.data[0] || null : null;
+        if (winner?.jugador_id === player.id) alias = winner;
+      }
+    } else {
+      console.warn('[haxoleSupabase] No se pudo guardar el alias:', insertedAlias.status || insertedAlias.error);
+    }
   }
 
   return { player, alias, created: !player?.created_at || String(player.created_at) === now };

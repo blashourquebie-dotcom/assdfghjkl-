@@ -57,6 +57,7 @@ const buildNickname = (member, cfg = readConfig()) => {
 const updateNickname = async (member) => {
   try {
     const cfg = readConfig();
+    if (cfg.automation?.autoNicknames === false) return;
     const { newNick, prefixParts } = buildNickname(member, cfg);
     const desiredNick = newNick || stripNickTags(member.displayName || member.user.username);
 
@@ -74,6 +75,7 @@ const updateNickname = async (member) => {
     if (!member.manageable) return;
 
     if ((member.nickname || member.user.username) === desiredNick) return;
+    if (readConfig().automation?.autoNicknames === false) return;
 
     console.log(`[nicknames] setting nickname for ${member.user.tag} (${member.id}) -> "${desiredNick}" [${prefixParts.join(", ")}]`);
     await member.setNickname(desiredNick, "Actualizar apodo por roles de club");

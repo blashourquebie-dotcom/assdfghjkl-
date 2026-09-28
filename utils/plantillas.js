@@ -9,8 +9,27 @@ const memberLoads = new WeakMap();
 const ensureGuildMembersLoaded = async (guild) => {
   if (loadedGuilds.has(guild)) return true;
   if (!memberLoads.has(guild)) {
-    const loading = guild.members.fetch({ force: true, time: 30000 })
-      .then(() => { loadedGuilds.add(guild); return true; })
+    const loading = (async () => {
+      if (typeof guild.members.list !== 'function') {
+        const members = await guild.members.fetch({ force: true, time: 30000 });
+        if (!members?.size || (guild.memberCount && members.size < guild.memberCount)) throw new Error('Lista de miembros incompleta');
+      } else {
+        let after;
+        for (;;) {
+          const page = await guild.members.list({ limit: 1000, ...(after ? { after } : {}) });
+          if (!page?.size) {
+            if (!after) throw new Error('Discord no devolvió miembros del servidor');
+            break;
+          }
+          if (page.size < 1000) break;
+          const lastId = Array.from(page.keys()).at(-1);
+          if (!lastId || lastId === after) throw new Error('Paginación de miembros incompleta');
+          after = lastId;
+        }
+      }
+      loadedGuilds.add(guild);
+      return true;
+    })()
       .finally(() => memberLoads.delete(guild));
     memberLoads.set(guild, loading);
   }
@@ -199,13 +218,25 @@ const reconcileClubRosterFromRoles = async (guild, clubEntry, modality) => {
 const pendingTemplateRefreshes = new Map();
 const scheduleTemplateRefresh = (guild, clubName, modality) => {
   const key = `${guild.id}:${clubName}:${modality}`;
-  if (pendingTemplateRefreshes.has(key)) return;
-  const timer = setTimeout(() => {
-    pendingTemplateRefreshes.delete(key);
-    void withGuild(guild.id, () => updateLinkedForumTemplates(guild, clubName, modality))
-      .catch((error) => console.error(`Plantilla ${clubName} ${modality}:`, error));
+  const job = pendingTemplateRefreshes.get(key) || { timer: null, running: false, dirty: false };
+  pendingTemplateRefreshes.set(key, job);
+  if (job.running) { job.dirty = true; return; }
+  if (job.timer) clearTimeout(job.timer);
+  job.timer = setTimeout(async () => {
+    job.timer = null;
+    job.running = true;
+    try {
+      await withGuild(guild.id, () => updateLinkedForumTemplates(guild, clubName, modality));
+    } catch (error) {
+      console.error(`Plantilla ${clubName} ${modality}:`, error);
+    } finally {
+      job.running = false;
+      if (job.dirty) {
+        job.dirty = false;
+        scheduleTemplateRefresh(guild, clubName, modality);
+      } else pendingTemplateRefreshes.delete(key);
+    }
   }, 400);
-  pendingTemplateRefreshes.set(key, timer);
 };
 
 const syncMemberClubRoles = async (guild, member, previousRoleIds = []) => {
@@ -595,5 +626,6 @@ module.exports = {
   restoreDeletedForumTemplate,
   reconcileClubRosterFromRoles,
   ensureGuildMembersLoaded,
+  scheduleTemplateRefresh,
   syncMemberClubRoles
 };

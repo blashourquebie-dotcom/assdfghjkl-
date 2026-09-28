@@ -10,7 +10,7 @@ const roleRegistry = require("./roleRegistry");
 const validators = require("./validators");
 const nicknames = require("./nicknames");
 const market = require("./market");
-const { updateLinkedForumTemplates } = require("./plantillas");
+const { ensureGuildMembersLoaded, updateLinkedForumTemplates } = require("./plantillas");
 const { isCaptain } = require("./clubPermissions");
 const divisions = require("./divisions");
 const haxoleSupabase = require("./haxoleSupabase");
@@ -260,11 +260,10 @@ const applyPendingTransfer = async (client, messageId, reactingUserId) => {
     const roleLimit = validators.getRoleLimit(transfer.toRoleId, mod);
     if (roleLimit) {
       const role = await guild.roles.fetch(transfer.toRoleId).catch(() => null);
-      let allMembers;
       try {
-        allMembers = await guild.members.fetch({ force: true, time: 30000 });
-        if (!allMembers?.size || (guild.memberCount && allMembers.size < guild.memberCount)) throw new Error("lista incompleta");
-      } catch {
+        await ensureGuildMembersLoaded(guild);
+      } catch (error) {
+        console.error(`[transfers] No pude cargar los miembros de ${guild.id}:`, error?.code || error?.status || '', error?.message || error);
         updatePendingTransfer(messageId, { status: "pending", processingBy: null, processingAt: null });
         return fail("members_unavailable");
       }
@@ -272,7 +271,7 @@ const applyPendingTransfer = async (client, messageId, reactingUserId) => {
         updatePendingTransfer(messageId, { status: "pending", processingBy: null, processingAt: null });
         return fail("target_role_missing");
       }
-      const currentCount = Array.from(allMembers.values()).filter((entry) => entry.roles.cache.has(transfer.toRoleId)).length;
+      const currentCount = role.members.size;
       const alreadyInTarget = member.roles.cache.has(transfer.toRoleId);
       if (!alreadyInTarget && currentCount >= roleLimit) {
         const channel = await guild.channels.fetch(transfer.channelId).catch(() => null);

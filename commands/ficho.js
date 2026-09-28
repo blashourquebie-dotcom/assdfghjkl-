@@ -4,7 +4,7 @@ const clubs = require("../utils/clubs");
 const validators = require("../utils/validators");
 const nicknames = require("../utils/nicknames");
 const roleRegistry = require("../utils/roleRegistry");
-const { updateLinkedForumTemplates } = require("../utils/plantillas");
+const { ensureGuildMembersLoaded, scheduleTemplateRefresh } = require("../utils/plantillas");
 const { sendAlert, sendCapActionAlert } = require("../utils/alerts");
 const market = require("../utils/market");
 const { sendTempInteractionReply } = require("../utils/tempMessage");
@@ -42,8 +42,6 @@ module.exports = {
     if (!clubEntry || !modality) {
       return interaction.reply({ content: "La vinculacion de este foro esta incompleta. Volve a usar `/foroclub`.", flags: 64 });
     }
-    const modalityRow = await haxoleSupabase.getModalidadRow(modality).catch(() => null);
-
     const isAdmin = interaction.member?.permissions?.has(PermissionFlagsBits.Administrator);
     const isStaff = isClubStaff(cfg, clubEntry.name, modality, interaction.user.id);
     const generalRoles = roleRegistry.getGeneralRoles(cfg, interaction.guild.id, modality);
@@ -64,6 +62,7 @@ module.exports = {
     }
 
     await interaction.deferReply({ flags: 64 });
+    const modalityRow = await haxoleSupabase.getModalidadRow(modality).catch(() => null);
 
     const clubRoleRecovery = await ensureClubRoleForModality(interaction.guild, cfg, clubEntry, modality, {
       reason: `Recuperacion por /ficho para ${clubEntry.name} ${modality}`
@@ -118,17 +117,15 @@ module.exports = {
       .length;
     const roleLimit = validators.getRoleLimit(roleId, modality);
     if (roleLimit && newSigningCount > 0) {
-      let allMembers;
       try {
-        allMembers = await interaction.guild.members.fetch({ force: true, time: 30000 });
-        if (!allMembers?.size || (interaction.guild.memberCount && allMembers.size < interaction.guild.memberCount)) throw new Error("lista incompleta");
-      }
-      catch (error) {
-        return interaction.editReply({ content: 'No pude consultar la lista completa del rol. Revisá el intent de miembros de Discord y volvé a intentar.' });
+        await ensureGuildMembersLoaded(interaction.guild);
+      } catch (error) {
+        console.error(`[ficho] No pude cargar los miembros de ${interaction.guild.id}:`, error?.code || error?.status || '', error?.message || error);
+        return interaction.editReply({ content: 'No pude comprobar el cupo del club en Discord. No se fichó a nadie; volvé a intentar.' });
       }
       const role = await interaction.guild.roles.fetch(roleId).catch(() => null);
       if (!role) return interaction.editReply({ content: 'No pude consultar el rol del club. Volvé a intentar.' });
-      const currentCount = Array.from(allMembers.values()).filter((entry) => entry.roles.cache.has(roleId)).length;
+      const currentCount = role.members.size;
       if (currentCount + newSigningCount > roleLimit) {
         return sendTempInteractionReply(interaction, {
           content: [
@@ -155,11 +152,13 @@ module.exports = {
         confirmationKey: interaction.sourceMessage?.content || `ficho:${clubEntry.name}:${modality}:${userIds.join(",")}`
       })
       : { ok: true };
-    if (!marketCheck.ok) return interaction.reply({ content: marketCheck.message, flags: 64 });
+    if (!marketCheck.ok) return interaction.editReply({ content: marketCheck.message });
 
     const lines = [];
     const appliedIds = [];
     const touchedModalities = new Set();
+    let playerRole;
+    let clubId;
     for (const userId of missingIds) {
       lines.push(`Aviso: <@${userId}> no encontrado.`);
     }
@@ -191,7 +190,13 @@ module.exports = {
 
       const alreadyHadRole = member.roles.cache.has(roleId);
       if (!alreadyHadRole) {
-        await member.roles.add(roleId, `Fichado por ${interaction.user.tag} via !ficho`);
+        try {
+          await member.roles.add(roleId, `Fichado por ${interaction.user.tag} via !ficho`);
+        } catch (error) {
+          console.error(`[ficho] No pude asignar el rol ${roleId} a ${member.id}:`, error?.code || error?.status || '', error?.message || error);
+          lines.push(`Aviso: <@${member.id}> no se pudo fichar por un error de Discord.`);
+          continue;
+        }
       }
 
       upsertUserClubAffiliation(member.id, {
@@ -206,38 +211,41 @@ module.exports = {
         addHistory(member.id, "FICHO", { modality, club: clubEntry.name, by: interaction.user.tag });
       }
 
-      let playerRole = await divisions.getClubPlayerRole(interaction.guild, cfg, clubEntry.name, modality, { ensure: true });
-      if (!playerRole?.roleId) {
-        await ensureGeneralRolesForModality(interaction.guild, cfg, interaction.guild.id, modality, {
-          reason: `Recuperacion de roles base por /ficho (${clubEntry.name} ${modality})`,
-          ensureSecondDivision: true,
-          keepClubRolesBelowPlayer: cfg.automation?.clubRolesBelowPlayer !== false
-        }).catch(() => null);
+      if (playerRole === undefined) {
         playerRole = await divisions.getClubPlayerRole(interaction.guild, cfg, clubEntry.name, modality, { ensure: true });
+        if (!playerRole?.roleId) {
+          await ensureGeneralRolesForModality(interaction.guild, cfg, interaction.guild.id, modality, {
+            reason: `Recuperacion de roles base por /ficho (${clubEntry.name} ${modality})`,
+            ensureSecondDivision: true,
+            keepClubRolesBelowPlayer: cfg.automation?.clubRolesBelowPlayer !== false
+          }).catch(() => null);
+          playerRole = await divisions.getClubPlayerRole(interaction.guild, cfg, clubEntry.name, modality, { ensure: true });
+        }
       }
       if (playerRole?.roleId && !member.roles.cache.has(playerRole.roleId)) {
         await member.roles.add(playerRole.roleId, "Rol jugador/division agregado via !ficho").catch(() => null);
       }
       await divisions.syncMemberDivisionRoles(interaction.guild, member, cfg, modality, { ensure: true });
-        await haxoleSupabase.upsertPlayerIdentity({
-          guildId: interaction.guild.id,
-          discordUserId: member.id,
+      if (clubId === undefined) clubId = await haxoleSupabase.getClubIdByName(clubEntry.name).catch(() => null);
+      await haxoleSupabase.upsertPlayerIdentity({
+        guildId: interaction.guild.id,
+        discordUserId: member.id,
         discordUsername: member.user.tag,
         discordAvatarUrl: member.displayAvatarURL({ size: 128 }),
         haxballName: member.displayName,
-        clubId: await haxoleSupabase.getClubIdByName(clubEntry.name).catch(() => null),
+        clubId,
         clubName: clubEntry.name,
         modalidadId: modalityRow?.id || null,
-          modalidadName: modality,
-          source: "ficho"
-        }).catch(() => null);
-        if (autoNicknames) void nicknames.updateNickname(member).catch(() => null);
-        lines.push(alreadyHadRole
-          ? `Aviso: **${member.user.tag}** ya estaba fichado en **${clubEntry.name} ${modality}**. Plantilla sincronizada.`
-          : `${CHECK_EMOJI} **${member.user.tag}** fichado en **${clubEntry.name} ${modality}**.`);
-        if (!alreadyHadRole) appliedIds.push(member.id);
-        touchedModalities.add(modality);
-      }
+        modalidadName: modality,
+        source: "ficho"
+      }).catch(() => null);
+      if (autoNicknames) void nicknames.updateNickname(member).catch(() => null);
+      lines.push(alreadyHadRole
+        ? `Aviso: **${member.user.tag}** ya estaba fichado en **${clubEntry.name} ${modality}**.`
+        : `${CHECK_EMOJI} **${member.user.tag}** fichado en **${clubEntry.name} ${modality}**.`);
+      if (!alreadyHadRole) appliedIds.push(member.id);
+      touchedModalities.add(modality);
+    }
 
       if (appliedIds.length) {
         market.registerSignings({ club: clubEntry.name, modality, amount: appliedIds.length });
@@ -249,9 +257,7 @@ module.exports = {
         }).catch(() => null);
       }
 
-    for (const mod of touchedModalities) {
-      await updateLinkedForumTemplates(interaction.guild, clubEntry.name, mod);
-    }
+    for (const mod of touchedModalities) scheduleTemplateRefresh(interaction.guild, clubEntry.name, mod);
 
       const response = await sendTempInteractionReply(interaction, {
         content: [`**Fichaje en ${clubEntry.name} ${modality}**`, lines.join("\n")].join("\n"),

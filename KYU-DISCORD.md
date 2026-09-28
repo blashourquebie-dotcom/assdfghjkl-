@@ -62,7 +62,13 @@ Abrí `https://assdfghjkl-production-9b52.up.railway.app/kyu/health`:
 3. Reabrí KyuApp → **Vincular Discord** arriba a la derecha → autorizá con la cuenta que tiene el rol → volvé a KyuApp → **Jugar**.
 4. Si aparece `redirect_uri` inválido, compará el redirect exacto con el de arriba. Si falta el rol, verificá servidor, cuenta e ID del rol. Si los comandos no aparecen, verificá `KYU_GUILD_ID`, la invitación del bot y que Interactions Endpoint URL esté vacío.
 
-Comandos añadidos: `/instalaciónkyu`, `/plan usuario plan tiempo`, `/planremove usuario`, `/jugadores canal`, `/ticket`, `/ticketcerrar`, `/cv nombre`. El tiempo se escribe `12h`, `30d` o `4w`. `/ticket` necesita `KYU_STAFF_ROLE_ID` para abrir consultas privadas.
+Comandos añadidos: `/instalaciónkyu`, `/plan usuario plan tiempo`, `/planremove usuario`, `/jugadores canal`, `/logplanes canal`, `/ticket`, `/ticketcerrar`, `/cv nombre`. El tiempo se escribe `12h`, `30d` o `4w`. `/ticket` necesita `KYU_STAFF_ROLE_ID` para abrir consultas privadas.
+
+### Cambios b-0.3
+
+`/jugadores canal` registra entradas mediante embeds, sin editar un mensaje periódicamente. El heartbeat sigue comprobando acceso; el registro no prueba que alguien esté en un partido. `/logplanes canal` registra el usuario, plan, vencimiento y administrador que otorgó o retiró un plan.
+
+Las sesiones se conservan en `KYU_DATA_FILE` mediante hashes, nunca tokens en texto plano, y vencen a los 30 días. Debe estar en un volumen persistente. Un reinicio conserva el acceso; perder el rol o cerrar sesión lo revoca. La app b-0.3 cifra la credencial con la cuenta de Windows. Estos cambios requieren desplegar este repositorio, no el backend independiente.
 
 ## Alcance y límites
 
