@@ -33,7 +33,7 @@ test('registers Kyu commands without OAuth and continues after another guild fai
   assert.equal(failures.length, 1);
   const names = integration.commandsFor('1510011417712132117').map(c => c.name).sort();
   assert.deepEqual(calls[1].commands.map(c => c.name).sort(), names);
-  assert.equal(calls[1].commands.length, 8);
+  assert.equal(calls[1].commands.length, 14);
   assert.ok(names.includes('logplanes'));
   for (const call of [calls[0], calls[2]]) {
     assert.ok(call.commands.length > 0, 'league commands are preserved');

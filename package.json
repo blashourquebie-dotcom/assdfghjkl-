@@ -8,7 +8,7 @@
     "dev": "nodemon index.js",
     "test": "node --test tests/*.test.js",
     "kyu:check": "node scripts/check-kyu.js",
-    "test:kyu": "node --test tests/kyuApp.test.js tests/kyuCommandRegistration.test.js tests/kyuRoles.test.js"
+    "test:kyu": "node --test tests/kyuApp.test.js tests/kyuCommandRegistration.test.js tests/kyuRoles.test.js tests/kyuCommunity.test.js"
   },
   "keywords": [],
   "author": "@zeiiven_",

@@ -1,6 +1,7 @@
 const http=require('node:http');const fs=require('node:fs');const path=require('node:path');
 const {hash,token,authorize,verifyInteraction,duration,isAdmin}=require('./access.cjs');
 const {ticketPanel}=require('./commands.cjs');
+const {createCommunity,banner}=require('./community.cjs');
 function createService(env=process.env,transport=fetch){
  const cfg={guild:env.DISCORD_GUILD_ID,playerRole:env.KYU_PLAYER_ROLE_ID,pro:env.KYU_PRO_ROLE_ID,proplus:env.KYU_PRO_PLUS_ROLE_ID,streamerRoles:(env.KYU_STREAMER_ROLE_IDS||'').split(',').map(s=>s.trim()).filter(Boolean)};
  const dataFile=path.resolve(env.DATA_FILE||'data/kyu.json');let db={users:{},plans:{},friends:[],tickets:{},voices:{},roles:{},presence:null};
@@ -13,7 +14,13 @@ function createService(env=process.env,transport=fetch){
  const groups=require('./groups.cjs').createGroups(db,save);
  db.accessSessions=db.accessSessions||{};const SESSION_TTL=30*86400000;
  const ready=()=>!!(env.DISCORD_CLIENT_ID&&env.DISCORD_CLIENT_SECRET&&env.DISCORD_BOT_TOKEN&&cfg.guild&&env.PUBLIC_URL);
- async function discord(route,method='GET',body,auth='Bot '+env.DISCORD_BOT_TOKEN){let r;try{r=await transport('https://discord.com/api/v10'+route,{method,headers:{Authorization:auth,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(12000)});}catch{throw Object.assign(new Error('Discord no disponible. Intentá nuevamente.'),{status:503});}if(!r.ok)throw Object.assign(new Error('Discord no disponible o permisos insuficientes ('+r.status+').'),{status:[401,403,404].includes(r.status)?403:503});return r.status===204?null:r.json();}
+ async function discord(route,method='GET',body,auth='Bot '+env.DISCORD_BOT_TOKEN){
+  const headers={Authorization:auth};let payload;
+  if(body?._files){const {_files,...json}=body;payload=new FormData();payload.set('payload_json',JSON.stringify(json));_files.forEach((f,n)=>payload.set('files['+n+']',new Blob([f.bytes],{type:'image/png'}),f.name));}
+  else{headers['Content-Type']='application/json';payload=body===undefined?undefined:JSON.stringify(body);}
+  let r;try{r=await transport('https://discord.com/api/v10'+route,{method,headers,body:payload,signal:AbortSignal.timeout(12000)});}catch{throw Object.assign(new Error('Discord no disponible. Intentá nuevamente.'),{status:503});}if(!r.ok)throw Object.assign(new Error('Discord no disponible o permisos insuficientes ('+r.status+').'),{status:[401,403,404].includes(r.status)?403:503});return r.status===204?null:r.json();
+ }
+ const community=createCommunity({db,save,discord,cfg,env});
  async function identity(id){
   if(!cfg.playerRole)throw new Error('El bot todavía no tiene configurado el ID del rol Kyu. Un administrador debe ejecutar /instalaciónkyu y guardar KYU_PLAYER_ROLE_ID en Railway.');
   const member=await discord(`/guilds/${cfg.guild}/members/${id}`);const rights=authorize(member,cfg);
@@ -24,12 +31,13 @@ function createService(env=process.env,transport=fetch){
  const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value))};
  async function read(req){let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>32768)throw new Error('Solicitud demasiado grande.');chunks.push(c)}return Buffer.concat(chunks);}
  const option=(i,name)=>i.data?.options?.find(o=>o.name===name)?.value;
- async function removePlan(id){const plan=db.plans[id];if(!plan)return;for(const role of [cfg.pro,cfg.proplus])if(role)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${role}`,'DELETE');if(plan.grantedPlayer&&cfg.playerRole)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${cfg.playerRole}`,'DELETE');delete db.plans[id];save();}
+ async function removePlan(id){const plan=db.plans[id];if(!plan)return;for(const role of [cfg.pro,cfg.proplus])if(role)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${role}`,'DELETE');delete db.plans[id];save();}
  async function logPlan(admin,target,plan,expires){if(!db.planLog)return '';try{await discord(`/channels/${db.planLog}/messages`,'POST',{embeds:[{title:'Plan · KyuApp',color:0xffadd0,fields:[{name:'Jugador',value:'<@'+target+'>'},{name:'Plan',value:plan},{name:'Administrador',value:'<@'+admin+'>'},...(expires?[{name:'Vence',value:'<t:'+Math.floor(expires/1000)+':f>'}]:[])],timestamp:new Date().toISOString()}],allowed_mentions:{parse:[]}});return '';}catch{return 'Plan actualizado; no se pudo enviar el registro. ';}}
  async function command(i){
   const user=i.member?.user?.id;const name=i.data?.name;
   if(i.guild_id!==cfg.guild||!user)throw new Error('Servidor no autorizado.');
   const admin=isAdmin(i,cfg.guild);if(i.type===2&&!['cv','ticketcerrar'].includes(name)&&!admin)throw new Error('Necesitás Administrar servidor.');
+  const communityResult=await community.command(i);if(communityResult)return communityResult;
   if(i.type===3&&i.data.custom_id==='kyu:ticket'){
    const kind=i.data.values?.[0];if(!['comprar','crear','reclamar','consultar'].includes(kind))throw new Error('Motivo inválido.');
    const old=Object.values(db.tickets).find(t=>t.user===user&&!t.closed);if(old)return {content:`Ya tenés un ticket: <#${old.channel}>`};
@@ -53,19 +61,19 @@ function createService(env=process.env,transport=fetch){
   }
   if(name==='plan'){
    const id=option(i,'usuario'),plan=option(i,'plan'),expires=Date.now()+duration(option(i,'tiempo'));if(!['pro','proplus'].includes(plan)||!cfg[plan]||!cfg.playerRole)throw new Error('Ejecutá /instalaciónkyu primero.');
-   const member=await discord(`/guilds/${cfg.guild}/members/${id}`);const grantedPlayer=db.plans[id]?.grantedPlayer||!member.roles.includes(cfg.playerRole);
-   await discord(`/guilds/${cfg.guild}/members/${id}/roles/${cfg.playerRole}`,'PUT');await discord(`/guilds/${cfg.guild}/members/${id}/roles/${cfg[plan]}`,'PUT');
-   const other=plan==='pro'?cfg.proplus:cfg.pro;if(other)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${other}`,'DELETE');db.plans[id]={plan,expires,grantedPlayer};save();const warning=await logPlan(user,id,plan,expires);return {content:warning+`Plan ${plan} para <@${id}> hasta <t:${Math.floor(expires/1000)}:f>.`};
+   await discord(`/guilds/${cfg.guild}/members/${id}/roles/${cfg[plan]}`,'PUT');
+   const other=plan==='pro'?cfg.proplus:cfg.pro;if(other)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${other}`,'DELETE');db.plans[id]={plan,expires};save();const warning=await logPlan(user,id,plan,expires);return {content:warning+`Plan ${plan} para <@${id}> hasta <t:${Math.floor(expires/1000)}:f>. El rol jugador se administra por separado.`};
   }
   if(name==='planremove'){const target=option(i,'usuario');await removePlan(target);const warning=await logPlan(user,target,'Retirado');return {content:warning+'Plan retirado. No se quitaron roles jugador concedidos previamente por staff.'};}
   if(name==='jugadores'||name==='logplanes'){const channel=option(i,'canal');const info=await discord(`/channels/${channel}`);if(info.guild_id!==cfg.guild||![0,5,10,11,12].includes(info.type))throw new Error('Elegí un canal o hilo de este servidor.');if(name==='jugadores')db.presence={channel};else db.planLog=channel;save();return {content:name==='jugadores'?'Canal de entradas vinculado.':'Canal de planes vinculado.'};}
-  if(name==='ticket'){await discord(`/channels/${i.channel_id}/messages`,'POST',ticketPanel());return {content:'Panel de atención publicado.'};}
+  if(name==='ticket'){await discord(`/channels/${i.channel_id}/messages`,'POST',banner(ticketPanel(),'ticket',env));return {content:'Panel de atención publicado.'};}
   if(name==='ticketcerrar'){const ticket=db.tickets[i.channel_id];if(!ticket||ticket.closed)throw new Error('Este canal no es un ticket abierto.');const staff=env.KYU_STAFF_ROLE_ID&&i.member.roles.includes(env.KYU_STAFF_ROLE_ID);if(!admin&&!staff&&ticket.user!==user)throw new Error('No podés cerrar este ticket.');await discord(`/channels/${i.channel_id}/permissions/${ticket.user}`,'PUT',{type:1,allow:'66560',deny:'2048'});ticket.closed=true;save();return {content:'Ticket cerrado. El historial se conserva.'};}
   if(name==='cv'){if(!admin)await identity(user);const previous=db.voices[user];if(previous){try{const c=await discord(`/channels/${previous}`);return {content:`Ya tenés un canal: <#${c.id}>`};}catch{delete db.voices[user];}}
    const label=String(option(i,'nombre')||'Kyu').trim().slice(0,80);const permissions=[{id:cfg.guild,type:0,deny:'1049600'},{id:user,type:1,allow:'3146752'}];if(env.KYU_STAFF_ROLE_ID)permissions.push({id:env.KYU_STAFF_ROLE_ID,type:0,allow:'3146752'});const c=await discord(`/guilds/${cfg.guild}/channels`,'POST',{name:'🔒 '+label,type:2,permission_overwrites:permissions});db.voices[user]=c.id;save();return {content:`Canal privado: <#${c.id}>`};}
   throw new Error('Comando no reconocido.');
  }
  async function tick(){
+  await community.tick();
   const now=Date.now();for(const [key,p]of pairs)if(p.expires<now)pairs.delete(key);for(const [key,s]of states)if(s.expires<now)states.delete(key);for(const [key,s]of sessions)if(s.expires<now)sessions.delete(key);for(const [key,r]of rates)if(r.at+60000<now)rates.delete(key);for(const [key,t]of seenInteractions)if(t+300000<now)seenInteractions.delete(key);
   for(const [id,p]of Object.entries(db.plans))if(p.expires<now)await removePlan(id);
   let changed=false;for(const [key,v]of Object.entries(db.accessSessions))if(v.expires<now){delete db.accessSessions[key];changed=true;}if(changed)save();for(const [id,seen]of present)if(now-seen>75000)present.delete(id);

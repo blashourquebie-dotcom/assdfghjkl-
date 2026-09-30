@@ -23,7 +23,8 @@ function configuration(env = process.env) {
     KYU_PRO_PLUS_ROLE_ID: String(env.KYU_PRO_PLUS_ROLE_ID || '').trim() || defaults.proplus || '',
     KYU_STREAMER_ROLE_IDS: env.KYU_STREAMER_ROLE_IDS || '',
     KYU_STAFF_ROLE_ID: env.KYU_STAFF_ROLE_ID || '',
-    DATA_FILE: env.KYU_DATA_FILE || path.resolve(__dirname, '../data/kyu-app.json')
+    DATA_FILE: env.KYU_DATA_FILE || path.resolve(__dirname, '../data/kyu-app.json'),
+    KYU_BANNER_DIR: env.KYU_BANNER_DIR || path.resolve(__dirname, '../assets/banners/kyu')
   };
   return { enabled: env.KYU_ENABLED === '1', publicUrl, validUrl, env: mapped };
 }
@@ -58,7 +59,7 @@ function createIntegration(env = process.env, transport = fetch) {
     timer = setInterval(() => getService().tick().catch(() => console.error('[KyuApp] No se pudo actualizar planes/presencia.')), 30000);
     timer.unref();
   }
-  function handles(i) { return names.has(i.commandName) && i.isChatInputCommand?.() || i.customId === 'kyu:ticket' && i.isStringSelectMenu?.(); }
+  function handles(i) { return names.has(i.commandName) && i.isChatInputCommand?.() || i.customId === 'kyu:ticket' && i.isStringSelectMenu?.() || /^kyu:beta:[a-f0-9]{16}$/.test(i.customId || '') && i.isButton?.(); }
   async function interaction(i) {
     if (!handles(i)) return false;
     if (!isGuild(i.guildId || i.guild?.id)) {
@@ -72,10 +73,11 @@ function createIntegration(env = process.env, transport = fetch) {
         guild_id: i.guildId || i.guild.id,
         channel_id: i.channelId,
         member: {
-          user: { id: i.user.id },
+          user: { id: i.user.id, bot: !!i.user.bot },
           permissions: String(i.memberPermissions?.bitfield || 0),
           roles: i.member?.roles?.cache ? [...i.member.roles.cache.keys()] : i.member?.roles || []
         },
+        message: i.message ? { id: i.message.id } : undefined,
         data: { name: i.commandName, options: (i.options?.data || []).map(o => ({ name: o.name, value: o.value })), custom_id: i.customId, values: i.values }
       };
       await i.editReply({ ...await getService().command(raw), allowedMentions: { parse: [] } });
