@@ -1,6 +1,19 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const scope = require('../utils/tournamentScope');
+const leagueGuard = require('../utils/leagueRequestGuard');
+
+test('set/clear tournament slot RPCs stay scoped to their league', async () => {
+  const id = '11111111-1111-1111-1111-111111111111';
+  const read = async () => ({ ok: true, data: [{ id, tipo: 'ash' }] });
+  await scope.run({ guildId: '1293616776747286631' }, async () => {
+    for (const path of ['rpc/bot_set_tournament_slot', 'rpc/bot_clear_tournament_slot']) {
+      const body = { p_id: id, p_guild: '1293616776747286631' };
+      assert.equal((await leagueGuard.guard(path, { method: 'POST', body }, read)).body, body);
+      await assert.rejects(leagueGuard.guard(path, { method: 'POST', body: { ...body, p_guild: '1400962843674804264' } }, read), /alcance|liga/i);
+    }
+  });
+});
 
 test('league context is isolated between concurrent commands and supports prefix guild', async () => {
   const values = await Promise.all([

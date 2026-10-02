@@ -728,6 +728,16 @@ const replaceDisabledTournamentClub = async ({ torneoId, incomingClubId, outgoin
   return true;
 };
 
+const setTournamentSlot = async ({ torneoId, slot, incomingClubId, guildId }) => {
+  const result = await request('rpc/bot_set_tournament_slot', {
+    method: 'POST',
+    body: { p_id: torneoId, p_slot: slot, p_new: incomingClubId, p_guild: String(guildId) },
+    prefer: 'return=minimal'
+  });
+  if (!result.ok) throw new Error(result.error || `No se pudo asignar el cupo (HTTP ${result.status || 0})`);
+  return true;
+};
+
 const upsertOfficialMatch = async ({ modality, torneoName, fecha, clubLocalName, clubVisitanteName, golesLocal, golesVisitante, reportContent, recUrl = null }) => {
   const torneo = await getTournament({ modality, name: torneoName });
   if (!torneo) return null;
@@ -785,52 +795,14 @@ const upsertOfficialMatch = async ({ modality, torneoName, fecha, clubLocalName,
   return Array.isArray(inserted.data) ? inserted.data[0] || null : null;
 };
 
-const removeTournamentClub = async ({ torneoId, clubId }) => {
-  const currentRowsResult = await selectRows("torneo_clubes", {
-    torneo_id: `eq.${torneoId}`,
-    select: "id, torneo_id, club_id, posicion, created_at, club:clubes(*)"
+const removeTournamentClub = async ({ torneoId, clubId, guildId }) => {
+  const result = await request('rpc/bot_clear_tournament_slot', {
+    method: 'POST',
+    body: { p_id: torneoId, p_club: clubId, p_guild: String(guildId) },
+    prefer: 'return=representation'
   });
-  const currentRows = Array.isArray(currentRowsResult.data) ? currentRowsResult.data : [];
-  const removedRow = currentRows.find((row) => String(row.club_id) === String(clubId)) || null;
-
-  if (!removedRow) {
-    return { removed: false, removedFixtures: 0, resequenced: 0 };
-  }
-
-  await deleteRows("torneo_clubes", {
-    torneo_id: `eq.${torneoId}`,
-    club_id: `eq.${clubId}`
-  });
-
-  const fixtureDelete = await deleteRows("partidos", {
-    torneo_id: `eq.${torneoId}`,
-    club_local_id: `eq.${clubId}`,
-    jugado: "eq.false"
-  }).catch(() => null);
-  const fixtureDelete2 = await deleteRows("partidos", {
-    torneo_id: `eq.${torneoId}`,
-    club_visitante_id: `eq.${clubId}`,
-    jugado: "eq.false"
-  }).catch(() => null);
-
-  const remainingRows = currentRows
-    .filter((row) => String(row.club_id) !== String(clubId))
-    .sort((a, b) =>
-      (Number(a.posicion) || 9999) - (Number(b.posicion) || 9999) ||
-      String(a.created_at || "").localeCompare(String(b.created_at || ""))
-    );
-
-  let resequenced = 0;
-  for (let index = 0; index < remainingRows.length; index += 1) {
-    const row = remainingRows[index];
-    const desiredPosition = index + 1;
-    if (Number(row.posicion) === desiredPosition) continue;
-    const updated = await patchRows("torneo_clubes", { id: `eq.${row.id}` }, { posicion: desiredPosition });
-    if (Array.isArray(updated.data) && updated.data.length) resequenced += 1;
-  }
-
-  const removedFixtures = Number(fixtureDelete?.ok ? 1 : 0) + Number(fixtureDelete2?.ok ? 1 : 0);
-  return { removed: true, removedFixtures, resequenced };
+  if (!result.ok) throw new Error(result.error || `No se pudo liberar el cupo (HTTP ${result.status || 0})`);
+  return { removed: Boolean(result.data), removedFixtures: 0, resequenced: 0 };
 };
 
 const listFixtureRows = async (torneoId) => {
@@ -1132,6 +1104,7 @@ module.exports = {
   getNextMatchFecha,
   setTournamentClub,
   replaceDisabledTournamentClub,
+  setTournamentSlot,
   removeTournamentClub,
   listFixtureRows,
   deleteFixtureRows,

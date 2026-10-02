@@ -58,7 +58,7 @@ module.exports = {
     .addStringOption((o) => o.setName("modalidad").setDescription("Modalidad, ej: x3").setRequired(false).setAutocomplete(true))
     .addStringOption((o) => o.setName("club").setDescription("Club a inscribir").setRequired(false).setAutocomplete(true))
     .addStringOption((o) => o.setName("torneo").setDescription("Torneo destino").setRequired(false).setAutocomplete(true))
-    .addStringOption((o) => o.setName("club_a_reemplazar").setDescription("Opcional: club que sera reemplazado").setRequired(false).setAutocomplete(true)),
+    .addStringOption((o) => o.setName("club_a_reemplazar").setDescription("Club o Cupo 1, Cupo 2, etc.").setRequired(false).setAutocomplete(true)),
 
   async execute(interaction) {
     if (!interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
@@ -91,7 +91,6 @@ module.exports = {
       return interaction.reply({ content: `**${clubEntry.name}** no está habilitado en **${modality}**.`, flags: 64 });
     }
 
-    const replaceClubEntry = replaceClubQuery ? clubs.findClub(replaceClubQuery) : null;
     const torneo = await haxoleSupabase.getTournament({ modality, name: torneoName });
     if (!torneo) {
       return interaction.reply({ content: `No encontré el torneo **${torneoName}** en **${modality}**.`, flags: 64 });
@@ -101,30 +100,34 @@ module.exports = {
     }
 
     const currentRows = await haxoleSupabase.getTournamentClubRows(torneo.id);
+    const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+    const slotMatch = replaceClubQuery?.trim().match(/^cupo(?:\s+libre)?\s*#?\s*(\d+)$/i);
+    const explicitSlot = slotMatch ? Number(slotMatch[1]) : null;
+    if (explicitSlot !== null && (explicitSlot < 1 || explicitSlot > Number(torneo.cantidad_equipos))) {
+      return interaction.reply({ content: `El cupo debe estar entre 1 y ${torneo.cantidad_equipos}.`, flags: 64 });
+    }
     const inactiveRows = currentRows.filter(row => !clubs.getRoleForClub(clubs.findClub(row.club?.nombre), modality));
-    const replaceRow = replaceClubQuery
-      ? currentRows.find(row => String(row.club?.nombre || '').toLowerCase() === String(replaceClubEntry?.name || replaceClubQuery).toLowerCase())
-      : inactiveRows.sort((a,b)=>Number(a.posicion||0)-Number(b.posicion||0))[0] || null;
-    const alreadyLinked = currentRows.some((row) => String(row.club?.nombre || row.club_id) === String(clubEntry.name));
+    const replaceRow = explicitSlot !== null
+      ? currentRows.find(row => Number(row.posicion) === explicitSlot)
+      : replaceClubQuery
+        ? currentRows.find(row => [row.club?.nombre, row.club?.abreviacion, row.club?.nombre_corto].some(value => normalize(value) === normalize(replaceClubQuery)))
+        : inactiveRows.sort((a,b)=>Number(a.posicion||0)-Number(b.posicion||0))[0] || null;
+    const alreadyLinked = currentRows.some((row) => normalize(row.club?.nombre) === normalize(clubEntry.name));
 
-    if (replaceClubQuery && !replaceRow) {
+    if (replaceClubQuery && explicitSlot === null && !replaceRow) {
       return interaction.reply({
         content: `No encontré el club a reemplazar **${replaceClubQuery}** dentro de **${torneo.nombre}**.`,
         flags: 64
       });
     }
-    if (replaceRow && !inactiveRows.some(row=>row.club_id===replaceRow.club_id)) {
-      return interaction.reply({ content: `**${replaceRow.club?.nombre}** sigue habilitado en ${modality}; no se le puede quitar el cupo automáticamente.`, flags: 64 });
-    }
-
-    if (alreadyLinked && !replaceRow) {
+    if (alreadyLinked) {
       return interaction.reply({
         content: `El club **${clubEntry.name}** ya está inscripto en **${torneo.nombre}** (${modality}).`,
         flags: 64
       });
     }
 
-    if (!replaceRow && currentRows.length >= Number(torneo.cantidad_equipos || 0)) {
+    if (!replaceRow && explicitSlot === null && currentRows.length >= Number(torneo.cantidad_equipos || 0)) {
       return interaction.reply({
         content: `El torneo **${torneo.nombre}** ya completó su cupo. Hay que liberar o ampliar cupo primero.`,
         flags: 64
@@ -132,16 +135,17 @@ module.exports = {
     }
 
     try {
-      if (replaceRow) {
+      if (replaceRow || explicitSlot !== null) {
         const incoming = await haxoleSupabase.ensureClubRow(clubEntry.name);
         if (!incoming?.id) throw new Error('No se encontró el club habilitado en la base de datos.');
-        await haxoleSupabase.replaceDisabledTournamentClub({ torneoId: torneo.id, incomingClubId: incoming.id, outgoingClubId: replaceRow.club_id, guildId: interaction.guild.id });
+        await haxoleSupabase.setTournamentSlot({ torneoId: torneo.id, slot: explicitSlot ?? Number(replaceRow.posicion), incomingClubId: incoming.id, guildId: interaction.guild.id });
       } else {
         const occupied = new Set(currentRows.map(row=>Number(row.posicion)).filter(Number.isInteger));
         const targetPosition = Array.from({length:Number(torneo.cantidad_equipos||0)},(_,i)=>i+1).find(position=>!occupied.has(position));
         if (!targetPosition) throw new Error('No queda un cupo libre en el torneo.');
-        const inserted = await haxoleSupabase.setTournamentClub({ torneoId: torneo.id, clubName: clubEntry.name, position: targetPosition });
-        if (!inserted) throw new Error('No se pudo confirmar la inscripción en la base de datos.');
+        const incoming = await haxoleSupabase.ensureClubRow(clubEntry.name);
+        if (!incoming?.id) throw new Error('No se encontró el club habilitado en la base de datos.');
+        await haxoleSupabase.setTournamentSlot({ torneoId: torneo.id, slot: targetPosition, incomingClubId: incoming.id, guildId: interaction.guild.id });
       }
     } catch (error) {
       console.error("[entry] Error inscribiendo club en torneo:", error);
@@ -149,8 +153,8 @@ module.exports = {
     }
 
     return interaction.reply({
-      content: replaceRow
-        ? `✅ Club **${clubEntry.name}** ocupó el cupo de **${replaceRow.club?.nombre || replaceClubQuery}** en **${torneo.nombre}** (${modality}). Los partidos ya jugados conservan su historial.`
+      content: replaceRow || explicitSlot !== null
+        ? `✅ Club **${clubEntry.name}** ocupó el Cupo ${explicitSlot ?? replaceRow.posicion}${replaceRow ? ` de **${replaceRow.club?.nombre}**` : ''} en **${torneo.nombre}** (${modality}). Los partidos ya jugados conservan su historial.`
         : `✅ Club **${clubEntry.name}** inscrito en **${torneo.nombre}** (${modality}).`,
       flags: 64
     });
@@ -176,7 +180,18 @@ module.exports = {
       }
 
       if (focused.name === "club_a_reemplazar") {
-        return getClubAutocomplete(interaction, modality, String(focused.value || ""));
+        const torneoName = interaction.options.getString('torneo');
+        const torneo = torneoName && modality ? await haxoleSupabase.getTournament({ modality, name: torneoName }) : null;
+        if (!torneo) return interaction.respond([]);
+        const rows = await haxoleSupabase.getTournamentClubRows(torneo.id);
+        const query = String(focused.value || '').toLowerCase();
+        const options = Array.from({ length: Number(torneo.cantidad_equipos || 0) }, (_, i) => {
+          const occupant = rows.find(row => Number(row.posicion) === i + 1);
+          return { name: `Cupo ${i + 1} · ${occupant?.club?.nombre || 'libre'}`, value: `Cupo ${i + 1}` };
+        }).concat(rows.map(row => ({ name: row.club?.nombre || row.club_id, value: row.club?.nombre || row.club_id })))
+          .filter(option => !query || option.name.toLowerCase().includes(query) || option.value.toLowerCase().includes(query))
+          .slice(0, 25);
+        return interaction.respond(options);
       }
 
       if (focused.name === "torneo") {

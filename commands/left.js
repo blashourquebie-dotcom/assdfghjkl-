@@ -85,43 +85,41 @@ module.exports = {
       return interaction.reply({ content: "Tenés que indicar el torneo destino.", flags: 64 });
     }
 
-    const clubEntry = clubs.findClub(clubQuery);
-    if (!clubEntry) {
-      return interaction.reply({ content: `No encontré el club **${clubQuery}**.`, flags: 64 });
-    }
-
     const torneo = await haxoleSupabase.getTournament({ modality, name: torneoName });
     if (!torneo) {
       return interaction.reply({ content: `No encontré el torneo **${torneoName}** en **${modality}**.`, flags: 64 });
     }
 
     const currentRows = await haxoleSupabase.getTournamentClubRows(torneo.id);
-    const linkedRow = currentRows.find((row) => String(row.club?.nombre || row.club_id) === String(clubEntry.name));
+    const linkedRow = currentRows.find((row) => String(row.club?.nombre || row.club_id).toLowerCase() === String(clubQuery).toLowerCase());
     if (!linkedRow) {
       return interaction.reply({
-        content: `El club **${clubEntry.name}** no está inscripto en **${torneo.nombre}** (${modality}).`,
+        content: `El club **${clubQuery}** no está inscripto en **${torneo.nombre}** (${modality}).`,
         flags: 64,
       });
     }
 
+    let removalError = null;
     const result = await haxoleSupabase.removeTournamentClub({
       torneoId: torneo.id,
       clubId: linkedRow.club_id,
+      guildId: interaction.guild.id,
     }).catch((error) => {
       console.error("[left] Error sacando club del torneo:", error);
+      removalError = error;
       return null;
     });
 
     if (!result?.removed) {
       return interaction.reply({
-        content: "No pude sacar el club del torneo. Revisa la configuración de Supabase.",
+        content: `No pude sacar el club del torneo: ${removalError?.message || 'revisá la configuración de Supabase.'}`,
         flags: 64,
       });
     }
 
     return interaction.reply({
       content: [
-        `✅ Club **${clubEntry.name}** sacado de **${torneo.nombre}** (${modality}).`,
+        `✅ Club **${linkedRow.club?.nombre || clubQuery}** sacado de **${torneo.nombre}** (${modality}). Cupo ${linkedRow.posicion} libre.`,
         result.removedFixtures ? `Cruces pendientes removidos: **${result.removedFixtures}**.` : null,
         result.resequenced ? `Posiciones reordenadas: **${result.resequenced}**.` : null,
       ].filter(Boolean).join("\n"),
@@ -145,7 +143,13 @@ module.exports = {
       }
 
       if (focused.name === "club") {
-        return getClubAutocomplete(interaction, modality, String(focused.value || ""));
+        const torneoName = interaction.options.getString('torneo');
+        const torneo = torneoName && modality ? await haxoleSupabase.getTournament({ modality, name: torneoName }) : null;
+        if (!torneo) return getClubAutocomplete(interaction, modality, String(focused.value || ""));
+        const rows = await haxoleSupabase.getTournamentClubRows(torneo.id);
+        const query = String(focused.value || '').toLowerCase();
+        return interaction.respond(rows.filter(row => !query || String(row.club?.nombre || '').toLowerCase().includes(query))
+          .slice(0, 25).map(row => ({ name: `${row.club?.nombre || row.club_id} · Cupo ${row.posicion}`, value: row.club?.nombre || row.club_id })));
       }
 
       if (focused.name === "torneo") {
