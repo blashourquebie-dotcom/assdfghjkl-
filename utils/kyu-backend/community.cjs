@@ -42,10 +42,10 @@ function createCommunity({db,save,discord,cfg,env}){
    await discord(`/channels/${i.channel_id}/messages`,'POST',payload);db.prices=prices;save();return {content:'Planes publicados. Precios guardados.'};
   }
   if(name==='prolist'){
-   const filter=option(i,'plan');if(filter&&!['pro','proplus'].includes(filter))throw Error('Plan inválido.');
+   const filter=option(i,'plan');if(filter&&!['pro','proplus','playerRole','beta','ver'].includes(filter))throw Error('Plan inválido.');
    const rows=Object.entries(db.plans).filter(([,p])=>p.expires>Date.now()&&(!filter||p.plan===filter));
    const page=option(i,'pagina')||1,pages=Math.max(1,Math.ceil(rows.length/15));if(!Number.isInteger(page)||page<1||page>pages)throw Error('Página fuera de rango. Hay '+pages+' página(s).');
-   rows.sort((a,b)=>a[1].expires-b[1].expires);return {embeds:[{title:'Planes registrados · KyuApp',color:pink,description:rows.slice((page-1)*15,page*15).map(([id,p])=>`<@${id}> · ${p.plan==='proplus'?'Pro+':'Pro'} · vence <t:${Math.floor(p.expires/1000)}:f>`).join('\n')||'Sin planes activos registrados.',footer:{text:`Página ${page}/${pages} · No incluye roles asignados manualmente.`}}],allowed_mentions:{parse:[]}};
+   rows.sort((a,b)=>a[1].expires-b[1].expires);return {embeds:[{title:'Planes registrados · KyuApp',color:pink,description:rows.slice((page-1)*15,page*15).map(([id,p])=>`<@${id}> · ${({proplus:'Pro+',pro:'Pro',playerRole:'Kyu',beta:'Beta',ver:'Ver'}[p.plan]||p.plan)} · vence <t:${Math.floor(p.expires/1000)}:f>`).join('\n')||'Sin planes activos registrados.',footer:{text:`Página ${page}/${pages} · No incluye roles asignados manualmente.`}}],allowed_mentions:{parse:[]}};
   }
   if(name==='beta')return serial(async()=>{
    const limit=option(i,'cantidad');if(!Number.isInteger(limit)||limit<1||limit>10000)throw Error('El cupo debe estar entre 1 y 10000.');

@@ -73,3 +73,10 @@ test('shared catalog is immutable in league guilds; PRUEBAS can administer all l
   await request('rpc/publish_approved_report',{method:'POST',body:{p_match_id:'mt'}});
  });
 });
+
+test('bulk club replacement cannot spoof another guild', async()=>{
+ await scope.run({guildId:ash},async()=>{
+  await request('rpc/bot_replace_active_club',{method:'POST',body:{p_guild:ash,p_old:'old',p_new:'new'}});
+  await assert.rejects(request('rpc/bot_replace_active_club',{method:'POST',body:{p_guild:tem,p_old:'old',p_new:'new'}}),/otra liga/);
+ });
+});

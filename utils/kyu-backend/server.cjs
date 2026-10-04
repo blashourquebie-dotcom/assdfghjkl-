@@ -3,12 +3,12 @@ const {hash,token,authorize,verifyInteraction,duration,isAdmin}=require('./acces
 const {ticketPanel}=require('./commands.cjs');
 const {createCommunity,banner}=require('./community.cjs');
 function createService(env=process.env,transport=fetch){
- const cfg={guild:env.DISCORD_GUILD_ID,playerRole:env.KYU_PLAYER_ROLE_ID,pro:env.KYU_PRO_ROLE_ID,proplus:env.KYU_PRO_PLUS_ROLE_ID,streamerRoles:(env.KYU_STREAMER_ROLE_IDS||'').split(',').map(s=>s.trim()).filter(Boolean)};
+ const cfg={guild:env.DISCORD_GUILD_ID,playerRole:env.KYU_PLAYER_ROLE_ID,pro:env.KYU_PRO_ROLE_ID,proplus:env.KYU_PRO_PLUS_ROLE_ID,beta:env.KYU_BETA_ROLE_ID,ver:env.KYU_VER_ROLE_ID,streamerRoles:(env.KYU_STREAMER_ROLE_IDS||'').split(',').map(s=>s.trim()).filter(Boolean)};
  const dataFile=path.resolve(env.DATA_FILE||'data/kyu.json');let db={users:{},plans:{},friends:[],tickets:{},voices:{},roles:{},presence:null};
  try{db={...db,...JSON.parse(fs.readFileSync(dataFile,'utf8'))};}catch(e){if(e.code!=='ENOENT')throw e;}
  // Explicit deployment role IDs take precedence over persisted installation data.
  // Never allow a stored roles object to override the guild or streamer policy.
- for(const key of ['playerRole','pro','proplus'])cfg[key]=String(cfg[key]||'').trim()||String(db.roles?.[key]||'').trim();
+ for(const key of ['playerRole','pro','proplus','beta','ver'])cfg[key]=String(cfg[key]||'').trim()||String(db.roles?.[key]||'').trim();
  const save=()=>{fs.mkdirSync(path.dirname(dataFile),{recursive:true});fs.writeFileSync(dataFile+'.tmp',JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(dataFile+'.tmp',dataFile)};
  const pairs=new Map(),states=new Map(),sessions=new Map(),rates=new Map(),seenInteractions=new Map(),present=new Map();
  const groups=require('./groups.cjs').createGroups(db,save);
@@ -25,13 +25,13 @@ function createService(env=process.env,transport=fetch){
   if(!cfg.playerRole)throw new Error('El bot todavía no tiene configurado el ID del rol Kyu. Un administrador debe ejecutar /instalaciónkyu y guardar KYU_PLAYER_ROLE_ID en Railway.');
   const member=await discord(`/guilds/${cfg.guild}/members/${id}`);const rights=authorize(member,cfg);
   if(!rights.allowed)throw Object.assign(new Error(`La cuenta ${member.user?.username||id} no tiene el rol Kyu configurado (ID ${cfg.playerRole}) en el servidor ${cfg.guild}. Si ya tenés el rol kyu, revisá su ID en KYU_PLAYER_ROLE_ID; el nombre no alcanza.`),{status:403});
-  return {id,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,accessRoles:[cfg.playerRole,cfg.pro,cfg.proplus].filter(r=>r&&member.roles.includes(r)),...rights};
+  return {id,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,accessRoles:[cfg.playerRole,cfg.pro,cfg.proplus,cfg.beta,cfg.ver].filter(r=>r&&member.roles.includes(r)),...rights};
  }
  async function session(req){const credential=(req.headers.authorization||'').replace(/^Bearer /,'');const key=hash(credential);let s=sessions.get(key);const stored=db.accessSessions[key];if(!s&&stored)s={user:{id:stored.id},expires:stored.expires,lastSeen:0};if(!s||s.expires<Date.now()){sessions.delete(key);if(stored){delete db.accessSessions[key];save();}throw new Error('Sesión vencida. Volvé a vincular Discord.');}try{s.user=await identity(s.user.id);}catch(e){if(e.status===403||e.status===401){sessions.delete(key);delete db.accessSessions[key];save();}throw e;}sessions.set(key,s);return s;}
  const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value))};
  async function read(req){let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>32768)throw new Error('Solicitud demasiado grande.');chunks.push(c)}return Buffer.concat(chunks);}
  const option=(i,name)=>i.data?.options?.find(o=>o.name===name)?.value;
- async function removePlan(id){const plan=db.plans[id];if(!plan)return;for(const role of [cfg.pro,cfg.proplus])if(role)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${role}`,'DELETE');delete db.plans[id];save();}
+ async function removePlan(id){const plan=db.plans[id];if(!plan)return;for(const role of [cfg.pro,cfg.proplus,cfg.playerRole,cfg.beta,cfg.ver])if(role&&role===cfg[plan.plan])await discord(`/guilds/${cfg.guild}/members/${id}/roles/${role}`,'DELETE');delete db.plans[id];save();}
  async function logPlan(admin,target,plan,expires){if(!db.planLog)return '';try{await discord(`/channels/${db.planLog}/messages`,'POST',{embeds:[{title:'Plan · KyuApp',color:0xffadd0,fields:[{name:'Jugador',value:'<@'+target+'>'},{name:'Plan',value:plan},{name:'Administrador',value:'<@'+admin+'>'},...(expires?[{name:'Vence',value:'<t:'+Math.floor(expires/1000)+':f>'}]:[])],timestamp:new Date().toISOString()}],allowed_mentions:{parse:[]}});return '';}catch{return 'Plan actualizado; no se pudo enviar el registro. ';}}
  async function command(i){
   const user=i.member?.user?.id;const name=i.data?.name;
@@ -47,7 +47,7 @@ function createService(env=process.env,transport=fetch){
   }
   if(name==='instalaciónkyu'){
    const roles=await discord(`/guilds/${cfg.guild}/roles`);
-   const definitions=[['playerRole','kyu','KYU_PLAYER_ROLE_ID'],['pro','pro','KYU_PRO_ROLE_ID'],['proplus','pro+','KYU_PRO_PLUS_ROLE_ID']];
+   const definitions=[['playerRole','kyu','KYU_PLAYER_ROLE_ID'],['pro','pro','KYU_PRO_ROLE_ID'],['proplus','pro+','KYU_PRO_PLUS_ROLE_ID'],['beta','beta','KYU_BETA_ROLE_ID'],['ver','ver','KYU_VER_ROLE_ID']];
    const selected=definitions.map(([key,label,variable])=>{
     const explicit=String(env[variable]||'').trim();
     if(explicit){const r=roles.find(r=>r.id===explicit);if(!r)throw new Error(`${variable}=${explicit} no corresponde a un rol de este servidor. Corregí ese ID en Railway.`);return r;}
@@ -57,12 +57,12 @@ function createService(env=process.env,transport=fetch){
     return matches[0];
    });
    for(let n=0;n<definitions.length;n++){const [key,label]=definitions[n];const r=selected[n]||await discord(`/guilds/${cfg.guild}/roles`,'POST',{name:label,color:0xffadd0,permissions:'0',mentionable:false});cfg[key]=r.id;}
-   db.roles={playerRole:cfg.playerRole,pro:cfg.pro,proplus:cfg.proplus};save();return {content:`Roles Kyu, Pro y Pro+ configurados. El bot debe estar por encima de ellos.\nPara conservar estos IDs tras un despliegue, guardá en Railway:\nKYU_PLAYER_ROLE_ID=${cfg.playerRole}\nKYU_PRO_ROLE_ID=${cfg.pro}\nKYU_PRO_PLUS_ROLE_ID=${cfg.proplus}\nNo hace falta quitarte ni volver a asignarte un rol que ya tenés.`};
+   db.roles={playerRole:cfg.playerRole,pro:cfg.pro,proplus:cfg.proplus,beta:cfg.beta,ver:cfg.ver};save();return {content:`Roles Kyu, Pro y Pro+ configurados. El bot debe estar por encima de ellos.\nPara conservar estos IDs tras un despliegue, guardá en Railway:\nKYU_PLAYER_ROLE_ID=${cfg.playerRole}\nKYU_PRO_ROLE_ID=${cfg.pro}\nKYU_PRO_PLUS_ROLE_ID=${cfg.proplus}\nNo hace falta quitarte ni volver a asignarte un rol que ya tenés.`};
   }
   if(name==='plan'){
-   const id=option(i,'usuario'),plan=option(i,'plan'),expires=Date.now()+duration(option(i,'tiempo'));if(!['pro','proplus'].includes(plan)||!cfg[plan]||!cfg.playerRole)throw new Error('Ejecutá /instalaciónkyu primero.');
+   const id=option(i,'usuario'),plan=option(i,'plan'),expires=Date.now()+duration(option(i,'tiempo'));if(!['pro','proplus','playerRole','beta','ver'].includes(plan)||!cfg[plan]||!cfg.playerRole)throw new Error('Ejecutá /instalaciónkyu primero.');
    await discord(`/guilds/${cfg.guild}/members/${id}/roles/${cfg[plan]}`,'PUT');
-   const other=plan==='pro'?cfg.proplus:cfg.pro;if(other)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${other}`,'DELETE');db.plans[id]={plan,expires};save();const warning=await logPlan(user,id,plan,expires);return {content:warning+`Plan ${plan} para <@${id}> hasta <t:${Math.floor(expires/1000)}:f>. El rol jugador se administra por separado.`};
+   const other=plan==='pro'?cfg.proplus:plan==='proplus'?cfg.pro:null;if(other)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${other}`,'DELETE');db.plans[id]={plan,expires};save();const warning=await logPlan(user,id,plan,expires);return {content:warning+`Plan ${plan} para <@${id}> hasta <t:${Math.floor(expires/1000)}:f>. El rol jugador se administra por separado.`};
   }
   if(name==='planremove'){const target=option(i,'usuario');await removePlan(target);const warning=await logPlan(user,target,'Retirado');return {content:warning+'Plan retirado. No se quitaron roles jugador concedidos previamente por staff.'};}
   if(name==='jugadores'||name==='logplanes'){const channel=option(i,'canal');const info=await discord(`/channels/${channel}`);if(info.guild_id!==cfg.guild||![0,5,10,11,12].includes(info.type))throw new Error('Elegí un canal o hilo de este servidor.');if(name==='jugadores')db.presence={channel};else db.planLog=channel;save();return {content:name==='jugadores'?'Canal de entradas vinculado.':'Canal de planes vinculado.'};}

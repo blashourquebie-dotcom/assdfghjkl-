@@ -1,11 +1,11 @@
 const opt=(name,description,type,required=true,extra={})=>({name,description,type,required,...extra});
 const commands=[
  {name:'instalaciónkyu',description:'Crea los roles jugador Kyu, Pro y Pro+.'},
- {name:'plan',description:'Asigna un plan con vencimiento.',options:[opt('usuario','Jugador',6),opt('plan','Plan',3,true,{choices:[{name:'Pro',value:'pro'},{name:'Pro+',value:'proplus'}]}),opt('tiempo','Ejemplo: 30d, 12h, 4w',3)]},
+ {name:'plan',description:'Asigna un plan con vencimiento.',options:[opt('usuario','Jugador',6),opt('plan','Plan',3,true,{choices:[{name:'Pro',value:'pro'},{name:'Pro+',value:'proplus'},{name:'Kyu',value:'playerRole'},{name:'Beta',value:'beta'},{name:'Ver',value:'ver'}]}),opt('tiempo','Ejemplo: 30d, 12h, 4w',3)]},
  {name:'planremove',description:'Retira el plan Pro/Pro+ sin modificar el rol jugador.',options:[opt('usuario','Jugador',6)]},
  {name:'introduccion',description:'Publica la presentación de KyuApp.'},
  {name:'planes',description:'Publica los planes y guarda los precios indicados.',options:['pro_ars','pro_uyu','pro_boosts','proplus_ars','proplus_uyu','proplus_boosts'].map(k=>opt(k,k.replaceAll('_',' '),4,false,{min_value:1,max_value:10000000}))},
- {name:'prolist',description:'Lista los planes vigentes registrados por el bot.',options:[opt('plan','Filtrar por plan',3,false,{choices:[{name:'Pro',value:'pro'},{name:'Pro+',value:'proplus'}]}),opt('pagina','Página de resultados',4,false,{min_value:1})]},
+ {name:'prolist',description:'Lista los planes vigentes registrados por el bot.',options:[opt('plan','Filtrar por plan',3,false,{choices:[{name:'Pro',value:'pro'},{name:'Pro+',value:'proplus'},{name:'Kyu',value:'playerRole'},{name:'Beta',value:'beta'},{name:'Ver',value:'ver'}]}),opt('pagina','Página de resultados',4,false,{min_value:1})]},
  {name:'beta',description:'Abre una inscripción con cupo y rol beta sin permisos.',options:[opt('cantidad','Cupo de betatesters',4,true,{min_value:1,max_value:10000}),opt('rol','Rol beta (por defecto busca el nombre beta)',8,false)]},
  {name:'betaestado',description:'Muestra el cupo y las inscripciones pendientes.'},
  {name:'betacerrar',description:'Cierra la inscripción beta sin retirar los roles.'},

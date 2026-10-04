@@ -3,8 +3,10 @@ const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 const token=()=>crypto.randomBytes(32).toString('base64url');
 function authorize(member,config){
   const roles=Array.isArray(member?.roles)?member.roles:[];
-  const allowed=!!config.playerRole&&roles.includes(config.playerRole);
-  return {allowed,pro:allowed,streamer:allowed&&config.streamerRoles.some(id=>roles.includes(id))};
+  const has=key=>!!config[key]&&roles.includes(config[key]);
+  const proplus=has('proplus'),pro=proplus||has('pro')||has('playerRole')||has('beta');
+  const allowed=pro||has('ver'),tier=proplus?'proplus':pro?'pro':'basic';
+  return {allowed,pro,proplus,tier,profileLimit:proplus?null:pro?2:1,glass:pro,customization:pro,roomTools:proplus,streamer:allowed&&(config.streamerRoles||[]).some(id=>roles.includes(id))};
 }
 function verifyInteraction(raw,signature,timestamp,key,now=Date.now()){
   if(!/^\d+$/.test(timestamp||'')||Math.abs(now-Number(timestamp)*1000)>300000||!/^[a-f0-9]{128}$/i.test(signature||'')||!/^[a-f0-9]{64}$/i.test(key||''))return false;
