@@ -55,6 +55,8 @@ async function guard(path, options, read) {
       for (const row of rows(body?.p_rows)) {
         if (row.torneo_id && row.torneo_id !== body.p_tournament) deny();
       }
+    } else if (path === 'rpc/tournament_replacement_candidates') {
+      await assertTournament(body?.p_id);
     } else if (path === 'rpc/bot_replace_active_club') {
       if (body?.p_guild !== guild) deny();
     } else if (path === 'rpc/bot_archive_club') {

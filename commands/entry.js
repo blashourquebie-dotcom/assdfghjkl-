@@ -4,6 +4,12 @@ const clubs = require("../utils/clubs");
 const roleRegistry = require("../utils/roleRegistry");
 const haxoleSupabase = require("../utils/haxoleSupabase");
 
+async function replacementRows(tournamentId, enrolled) {
+  const result = await haxoleSupabase.request('rpc/tournament_replacement_candidates', {method:'POST',body:{p_id:tournamentId}});
+  if (!result.ok) throw new Error('Falta actualizar los cupos: aplicá 202610040002_preserve_vacant_clubs.sql.');
+  return [...enrolled, ...(result.data || []).filter(row=>row.vacant).map(row=>({club_id:row.club_id,posicion:row.posicion,vacant:true,club:{nombre:row.nombre}}))];
+}
+
 const getForumLink = (interaction) => {
   const cfg = readConfig();
   return cfg.forumClubs?.[interaction.channel?.id] || cfg.forumClubs?.[interaction.channel?.parentId] || null;
@@ -100,17 +106,20 @@ module.exports = {
     }
 
     const currentRows = await haxoleSupabase.getTournamentClubRows(torneo.id);
+    let candidates;
+    try { candidates = await replacementRows(torneo.id, currentRows); }
+    catch (error) { return interaction.reply({content:error.message,flags:64}); }
     const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
     const slotMatch = replaceClubQuery?.trim().match(/^cupo(?:\s+libre)?\s*#?\s*(\d+)$/i);
     const explicitSlot = slotMatch ? Number(slotMatch[1]) : null;
     if (explicitSlot !== null && (explicitSlot < 1 || explicitSlot > Number(torneo.cantidad_equipos))) {
       return interaction.reply({ content: `El cupo debe estar entre 1 y ${torneo.cantidad_equipos}.`, flags: 64 });
     }
-    const inactiveRows = currentRows.filter(row => !clubs.getRoleForClub(clubs.findClub(row.club?.nombre), modality));
+    const inactiveRows = candidates.filter(row => row.vacant || !clubs.getRoleForClub(clubs.findClub(row.club?.nombre), modality));
     const replaceRow = explicitSlot !== null
-      ? currentRows.find(row => Number(row.posicion) === explicitSlot)
+      ? candidates.find(row => Number(row.posicion) === explicitSlot)
       : replaceClubQuery
-        ? currentRows.find(row => [row.club?.nombre, row.club?.abreviacion, row.club?.nombre_corto].some(value => normalize(value) === normalize(replaceClubQuery)))
+        ? candidates.find(row => [row.club?.nombre, row.club?.abreviacion, row.club?.nombre_corto].some(value => normalize(value) === normalize(replaceClubQuery)))
         : inactiveRows.sort((a,b)=>Number(a.posicion||0)-Number(b.posicion||0))[0] || null;
     const alreadyLinked = currentRows.some((row) => normalize(row.club?.nombre) === normalize(clubEntry.name));
 
@@ -183,7 +192,7 @@ module.exports = {
         const torneoName = interaction.options.getString('torneo');
         const torneo = torneoName && modality ? await haxoleSupabase.getTournament({ modality, name: torneoName }) : null;
         if (!torneo) return interaction.respond([]);
-        const rows = await haxoleSupabase.getTournamentClubRows(torneo.id);
+        const rows = await replacementRows(torneo.id, await haxoleSupabase.getTournamentClubRows(torneo.id));
         const query = String(focused.value || '').toLowerCase();
         const options = Array.from({ length: Number(torneo.cantidad_equipos || 0) }, (_, i) => {
           const occupant = rows.find(row => Number(row.posicion) === i + 1);
