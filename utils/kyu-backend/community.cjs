@@ -12,6 +12,14 @@ function banner(payload,kind,env){
 }
 function createCommunity({db,save,discord,cfg,env}){
  const option=(i,name)=>i.data?.options?.find(o=>o.name===name)?.value;
+ const panel=(color,sections)=>({flags:32768,components:[{type:17,accent_color:color,components:sections.flatMap((content,index)=>index?[{type:14,divider:true},{type:10,content}]:[{type:10,content}])}]});
+ const betaPanel=c=>{const count=Object.values(c.entries).filter(e=>e==='joined').length,pending=Object.values(c.entries).filter(e=>e==='pending').length;return {flags:32768,components:[{type:17,accent_color:0x6f8cff,components:[
+  {type:10,content:'# 🧪 Beta'},
+  {type:14,divider:true},
+  {type:10,content:'## 🚀 INSCRIPCIONES ABIERTAS PARA BETATESTER\n👤 **'+count+'**/'+c.limit+(pending?' · '+pending+' pendiente'+(pending===1?'':'s'):'')+'\n\nProbá las próximas versiones de KyuApp y ayudanos a detectar errores.'},
+  {type:14,divider:true},
+  {type:1,components:[{type:2,style:1,label:count+pending>=c.limit?'Cupo completo':'Inscribirme',custom_id:'kyu:beta:'+c.id}]}
+ ]}]};};
  // One queue serializes the only capacity writer. Reservations are persisted
  // before assigning roles, so a restart cannot offer the last slot twice.
  let tail=Promise.resolve();
@@ -32,6 +40,15 @@ function createCommunity({db,save,discord,cfg,env}){
   });
   if(i.type!==2)return null;
   if(name==='introduccion'){
+   const payload=panel(0x6f8cff,[
+    '# 📚 Introducción a 2J x KyuApp\nDeveloped by **@m05e.**',
+    '## 🆕 KYUAPP\n⚡ **0 delay** · delay personalizado\n🎨 **100% personalizado**\n🧩 **100% optimizado** · FPS ilimitados y resolución personalizada\n✨ Imágenes de avatar · PNGs y GIFs\n👤 Salas multi popeo',
+    '## ⚡ 2J APP (LITE)\n⚡ **0 delay** · delay personalizado\n🧩 **100% optimizado** · FPS ilimitados y resolución personalizada\n🥔 Potato graphics'
+   ]);
+   await discord('/channels/'+i.channel_id+'/messages','POST',banner(payload,'kyuapp',env));
+   return {content:'Introducción publicada.'};
+  }
+  if(name==='introduccion_legacy'){
    const intro={embeds:[{color:pink,description:'# 📚 Introducción a 2J x KyuApp\nDeveloped by **\`@m05e.\`**\n\n## 🆕 KYUAPP\n- \`⚡\` **0 delay** · delay personalizado\n- \`🎨\` **100% personalizado**\n- \`🧩\` **100% optimizado** · FPS ilimitados y resolución personalizada\n- \`✨\` Imágenes de avatar · PNGs y GIFs\n- \`👤\` Salas multi popeo\n\n## ⚡ 2J APP (LITE)\n- \`⚡\` **0 delay** · delay personalizado\n- \`🧩\` **100% optimizado** · FPS ilimitados y resolución personalizada\n- \`🥔\` Potato graphics',footer:{text:'KyuApp · 2J App Lite'}}],allowed_mentions:{parse:[]}};
    await discord('/channels/'+i.channel_id+'/messages','POST',banner(intro,'kyuapp',env));
    return {content:'Introducción publicada.'};
@@ -40,6 +57,19 @@ function createCommunity({db,save,discord,cfg,env}){
    await discord(`/channels/${i.channel_id}/messages`,'POST',banner({embeds:[{title:'KyuApp',color:pink,description:'Tu lugar para jugar HaxBall.\n\nPersonalizá la cancha, la cámara, los marcadores y tu avatar. Guardá tus ajustes en perfiles y conectate con amigos desde Comunidad.\n\nPara entrar necesitás vincular Discord y tener el rol de jugador Kyu. Si necesitás acceso o ayuda, abrí un ticket.',footer:{text:'marce · m05e'},url:'https://github.com/MarceeeJs'}],allowed_mentions:{parse:[]}},'kyuapp',env));return {content:'Introducción publicada.'};
   }
   if(name==='planes'){
+   const old=db.prices||{},keys=['pro_ars','pro_uyu','pro_boosts','proplus_ars','proplus_uyu','proplus_boosts'],prices={pro_uyu:100,pro_boosts:1,proplus_ars:5500,proplus_uyu:150,proplus_boosts:2,...old};
+   for(const key of keys){const value=option(i,key);if(value!==undefined){if(!Number.isSafeInteger(value)||value<1||value>10000000)throw Error('Precio o cantidad inválida.');prices[key]=value;}}
+   if(!prices.pro_ars)throw Error('Indicá pro_ars la primera vez: falta confirmar el precio de Pro.');
+   const payload=panel(0x6f8cff,[
+    '# 💸 Planes',
+    '## 🪙 PLAN PRO\n💰 **$'+prices.pro_ars+' ARS** // **'+prices.pro_uyu+' UYU**\n🚀 **'+prices.pro_boosts+' boost'+(prices.pro_boosts===1?'':'s')+'** × 1 mes',
+    '## 💎 PLAN PRO+ (PLUS)\n💰 **$'+prices.proplus_ars+' ARS** // **'+prices.proplus_uyu+' UYU**\n🚀 **'+prices.proplus_boosts+' boost'+(prices.proplus_boosts===1?'':'s')+'** × 1 mes',
+    '> Abrí un ticket para consultar o adquirir un plan.'
+   ]);
+   await discord('/channels/'+i.channel_id+'/messages','POST',banner(payload,'planes',env));
+   db.prices=prices;save();return {content:'Planes publicados. Precios guardados.'};
+  }
+  if(name==='planes_component_legacy'){
    const old=db.prices||{},keys=['pro_ars','pro_uyu','pro_boosts','proplus_ars','proplus_uyu','proplus_boosts'],prices={pro_uyu:100,pro_boosts:1,proplus_ars:5500,proplus_uyu:150,proplus_boosts:2,...old};
    for(const key of keys){const value=option(i,key);if(value!==undefined){if(!Number.isSafeInteger(value)||value<1||value>10000000)throw Error('Precio o cantidad inválida.');prices[key]=value;}}
    if(!prices.pro_ars)throw Error('Indicá pro_ars la primera vez: falta confirmar el precio de Pro.');
