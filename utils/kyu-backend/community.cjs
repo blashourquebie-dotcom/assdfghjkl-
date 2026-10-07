@@ -24,8 +24,7 @@ function createCommunity({db,save,discord,cfg,env}){
  // before assigning roles, so a restart cannot offer the last slot twice.
  let tail=Promise.resolve();
  function serial(fn){const task=tail.then(fn);tail=task.catch(()=>{});return task;}
- function betaPayload(c){const count=Object.values(c.entries).filter(e=>e==='joined').length,pending=Object.values(c.entries).filter(e=>e==='pending').length;return {embeds:[{title:'INSCRIPCIONES BETATESTER',color:pink,description:`${count}/${c.limit} inscripciones${pending?' · '+pending+' pendientes':''}\nProbá las próximas versiones de KyuApp y ayudanos a detectar errores.`,...(c.image?{image:{url:c.image}}:{})}],components:[{type:1,components:[{type:2,style:1,label:count+pending>=c.limit?'Cupo completo':'Inscribirme',custom_id:'kyu:beta:'+c.id}]}],allowed_mentions:{parse:[]}};}
- async function refresh(c){try{await discord(`/channels/${c.channel}/messages/${c.message}`,'PATCH',betaPayload(c));c.dirty=false;save();}catch{c.dirty=true;save();}}
+ async function refresh(c){try{await discord(`/channels/${c.channel}/messages/${c.message}`,'PATCH',betaPanel(c));c.dirty=false;save();}catch{c.dirty=true;save();}}
  async function command(i){
   const name=i.data?.name,user=i.member.user.id;
   if(i.type===3&&String(i.data?.custom_id||'').startsWith('kyu:beta:'))return serial(async()=>{
@@ -96,11 +95,11 @@ function createCommunity({db,save,discord,cfg,env}){
    const roles=await discord(`/guilds/${cfg.guild}/roles`),explicit=option(i,'rol'),matches=roles.filter(r=>explicit?r.id===explicit:r.name.trim().toLowerCase()==='beta');
    if(matches.length!==1||matches[0].managed||[cfg.guild,cfg.playerRole,cfg.pro,cfg.proplus,env.KYU_STAFF_ROLE_ID].includes(matches[0].id)||BigInt(matches[0].permissions||'0')!==0n)throw Error('Elegí un rol beta único, sin permisos, distinto de jugador, Pro y staff.');
    const c={id:crypto.randomBytes(8).toString('hex'),role:matches[0].id,limit,entries:{},channel:i.channel_id,message:null};
-   const posted=await discord(`/channels/${c.channel}/messages`,'POST',banner(betaPayload(c),'betatesters',env));
-   if(!posted?.id)throw Error('Discord no confirmó el panel.');c.message=posted.id;c.image=posted.embeds?.[0]?.image?.url||null;db.beta=c;save();return {content:'Inscripción abierta. El bot debe estar por encima del rol beta.'};
+   const posted=await discord(`/channels/${c.channel}/messages`,'POST',banner(betaPanel(c),'betatesters',env));
+   if(!posted?.id)throw Error('Discord no confirmó el panel.');c.message=posted.id;db.beta=c;save();return {content:'Inscripción abierta. El bot debe estar por encima del rol beta.'};
   });
   if(name==='betaestado'){const c=db.beta;return {content:c?`Inscripción: <#${c.channel}> · ${Object.values(c.entries).filter(e=>e==='joined').length}/${c.limit} confirmadas · ${Object.values(c.entries).filter(e=>e==='pending').length} pendientes.`:'No hay inscripción abierta.'};}
-  if(name==='betacerrar')return serial(async()=>{const c=db.beta;if(!c)throw Error('No hay inscripción abierta.');const payload=betaPayload(c);payload.components[0].components[0].disabled=true;payload.components[0].components[0].label='Inscripción cerrada';await discord(`/channels/${c.channel}/messages/${c.message}`,'PATCH',payload);db.beta=null;save();return {content:'Inscripción cerrada. Se conservan los roles ya asignados.'};});
+  if(name==='betacerrar')return serial(async()=>{const c=db.beta;if(!c)throw Error('No hay inscripción abierta.');const payload=betaPanel(c);const button=payload.components[0].components.find(x=>x.type===1).components[0];button.disabled=true;button.label='Inscripción cerrada';await discord(`/channels/${c.channel}/messages/${c.message}`,'PATCH',payload);db.beta=null;save();return {content:'Inscripción cerrada. Se conservan los roles ya asignados.'};});
   return null;
  }
  return {command,tick:()=>serial(async()=>{if(db.beta?.dirty)await refresh(db.beta);})};
