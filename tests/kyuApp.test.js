@@ -102,9 +102,9 @@ test('OAuth pairing through existing HTTP listener validates cookie, role, singl
   const auth = { headers: { Authorization: 'Bearer ' + session.token } };
   assert.equal((await request('/v1/me', auth)).status, 200);
   state.roles = [];
-  assert.equal((await request('/v1/me', auth)).status, 403);
+  assert.equal((await (await request('/v1/me', auth)).json()).user.tier, 'basic');
   state.roles = ['player'];
-  assert.equal((await request('/v1/me', auth)).status, 403, 'revoked sessions do not resurrect');
+  assert.equal((await request('/v1/me', auth)).status, 200, 'role changes do not revoke identity');
   assert.equal((await request('/v1/me')).status, 403);
   const second = await (await request('/v1/pair', post({}))).json();
   const start2 = await request('/auth/start?pair=' + second.id, { redirect: 'manual' });
@@ -112,17 +112,17 @@ test('OAuth pairing through existing HTTP listener validates cookie, role, singl
   assert.equal((await request(callback2)).status, 403, 'missing browser cookie cannot authorize');
 });
 
-test('no Kyu role means no login token', async t => {
+test('no role still grants authenticated basic access', async t => {
   const { integration, state } = setup(t);
   state.roles = [];
   const request = await listener(t, integration);
   const pair = await (await request('/v1/pair', post({}))).json();
   const start = await request('/auth/start?pair=' + pair.id, { redirect: 'manual' });
   const callback = '/auth/callback?code=test&state=' + new URL(start.headers.get('location')).searchParams.get('state');
-  assert.equal((await request(callback, { headers: { cookie: start.headers.get('set-cookie').split(';')[0] } })).status, 403);
+  assert.equal((await request(callback, { headers: { cookie: start.headers.get('set-cookie').split(';')[0] } })).status, 200);
   const status = await (await request('/v1/pair/status', post(pair))).json();
-  assert.equal(status.ready, false);
-  assert.equal(status.token, undefined);
+  assert.equal(status.ready, true);
+  assert.equal(typeof status.token, 'string');assert.equal(status.user.tier,'basic');assert.equal(status.user.pro,false);
 });
 
 test('gateway commands enforce real Discord permissions and isolate the configured guild', async t => {
@@ -174,6 +174,6 @@ test('real Kyu role IDs authenticate despite stale saved roles; stale IDs no lon
   assert.equal(proplus.status,200);assert.equal((await proplus.json()).user.tier,'proplus');
   state.roles=['obsolete-player'];
   const revoked=await request('/v1/me',{headers:{Authorization:'Bearer '+session.token}});
-  assert.equal(revoked.status,403);
-  assert.match((await revoked.json()).error,/KYU_VER_ROLE_ID/);
+  assert.equal(revoked.status,200);
+  assert.equal((await revoked.json()).user.tier,'basic');
 });

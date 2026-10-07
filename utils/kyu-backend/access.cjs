@@ -5,7 +5,7 @@ function authorize(member,config){
   const roles=Array.isArray(member?.roles)?member.roles:[];
   const has=key=>!!config[key]&&roles.includes(config[key]);
   const proplus=has('proplus'),pro=proplus||has('pro')||has('playerRole')||has('beta');
-  const allowed=pro||has('ver'),tier=proplus?'proplus':pro?'pro':'basic';
+  const allowed=true,tier=proplus?'proplus':pro?'pro':'basic';
   return {allowed,pro,proplus,tier,profileLimit:proplus?null:pro?2:1,glass:pro,customization:pro,roomTools:proplus,streamer:allowed&&(config.streamerRoles||[]).some(id=>roles.includes(id))};
 }
 function verifyInteraction(raw,signature,timestamp,key,now=Date.now()){
