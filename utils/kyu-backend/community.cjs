@@ -32,9 +32,22 @@ function createCommunity({db,save,discord,cfg,env}){
   });
   if(i.type!==2)return null;
   if(name==='introduccion'){
+   const intro={embeds:[{color:pink,description:'# 📚 Introducción a 2J x KyuApp\nDeveloped by **\`@m05e.\`**\n\n## 🆕 KYUAPP\n- \`⚡\` **0 delay** · delay personalizado\n- \`🎨\` **100% personalizado**\n- \`🧩\` **100% optimizado** · FPS ilimitados y resolución personalizada\n- \`✨\` Imágenes de avatar · PNGs y GIFs\n- \`👤\` Salas multi popeo\n\n## ⚡ 2J APP (LITE)\n- \`⚡\` **0 delay** · delay personalizado\n- \`🧩\` **100% optimizado** · FPS ilimitados y resolución personalizada\n- \`🥔\` Potato graphics',footer:{text:'KyuApp · 2J App Lite'}}],allowed_mentions:{parse:[]}};
+   await discord('/channels/'+i.channel_id+'/messages','POST',banner(intro,'kyuapp',env));
+   return {content:'Introducción publicada.'};
+  }
+  if(name==='introduccion_legacy'){
    await discord(`/channels/${i.channel_id}/messages`,'POST',banner({embeds:[{title:'KyuApp',color:pink,description:'Tu lugar para jugar HaxBall.\n\nPersonalizá la cancha, la cámara, los marcadores y tu avatar. Guardá tus ajustes en perfiles y conectate con amigos desde Comunidad.\n\nPara entrar necesitás vincular Discord y tener el rol de jugador Kyu. Si necesitás acceso o ayuda, abrí un ticket.',footer:{text:'marce · m05e'},url:'https://github.com/MarceeeJs'}],allowed_mentions:{parse:[]}},'kyuapp',env));return {content:'Introducción publicada.'};
   }
   if(name==='planes'){
+   const old=db.prices||{},keys=['pro_ars','pro_uyu','pro_boosts','proplus_ars','proplus_uyu','proplus_boosts'],prices={pro_uyu:100,pro_boosts:1,proplus_ars:5500,proplus_uyu:150,proplus_boosts:2,...old};
+   for(const key of keys){const value=option(i,key);if(value!==undefined){if(!Number.isSafeInteger(value)||value<1||value>10000000)throw Error('Precio o cantidad inválida.');prices[key]=value;}}
+   if(!prices.pro_ars)throw Error('Indicá pro_ars la primera vez: falta confirmar el precio de Pro.');
+   const planText='# 💸 Planes\n\n## 🪙 PLAN PRO\n- \`💰\` **$'+prices.pro_ars+' ARS** // **'+prices.pro_uyu+' UYU**\n- \`🚀\` **'+prices.pro_boosts+' boost'+(prices.pro_boosts===1?'':'s')+'** × 1 mes\n\n## 💎 PLAN PRO+ (PLUS)\n- \`💰\` **$'+prices.proplus_ars+' ARS** // **'+prices.proplus_uyu+' UYU**\n- \`🚀\` **'+prices.proplus_boosts+' boost'+(prices.proplus_boosts===1?'':'s')+'** × 1 mes\n\n> Abrí un ticket para consultar o adquirir un plan.';
+   await discord('/channels/'+i.channel_id+'/messages','POST',banner({embeds:[{color:pink,description:planText,footer:{text:'KyuApp · precios configurados por administración'}}],allowed_mentions:{parse:[]}},'planes',env));
+   db.prices=prices;save();return {content:'Planes publicados. Precios guardados.'};
+  }
+  if(name==='planes_legacy'){
    const old=db.prices||{},keys=['pro_ars','pro_uyu','pro_boosts','proplus_ars','proplus_uyu','proplus_boosts'],prices={pro_uyu:100,pro_boosts:1,proplus_ars:5500,proplus_uyu:150,proplus_boosts:2,...old};
    for(const key of keys){const value=option(i,key);if(value!==undefined){if(!Number.isSafeInteger(value)||value<1||value>10000000)throw Error('Precio o cantidad inválida.');prices[key]=value;}}
    if(!prices.pro_ars)throw Error('Indicá pro_ars la primera vez: falta confirmar el precio de Pro.');
@@ -47,7 +60,7 @@ function createCommunity({db,save,discord,cfg,env}){
    const page=option(i,'pagina')||1,pages=Math.max(1,Math.ceil(rows.length/15));if(!Number.isInteger(page)||page<1||page>pages)throw Error('Página fuera de rango. Hay '+pages+' página(s).');
    rows.sort((a,b)=>a[1].expires-b[1].expires);return {embeds:[{title:'Planes registrados · KyuApp',color:pink,description:rows.slice((page-1)*15,page*15).map(([id,p])=>`<@${id}> · ${({proplus:'Pro+',pro:'Pro',playerRole:'Kyu',beta:'Beta',ver:'Ver'}[p.plan]||p.plan)} · vence <t:${Math.floor(p.expires/1000)}:f>`).join('\n')||'Sin planes activos registrados.',footer:{text:`Página ${page}/${pages} · No incluye roles asignados manualmente.`}}],allowed_mentions:{parse:[]}};
   }
-  if(name==='beta')return serial(async()=>{
+  if(name==='betatester')return serial(async()=>{
    const limit=option(i,'cantidad');if(!Number.isInteger(limit)||limit<1||limit>10000)throw Error('El cupo debe estar entre 1 y 10000.');
    if(db.beta)throw Error('Ya existe una inscripción. Usá /betaestado o /betacerrar antes de abrir otra.');
    const roles=await discord(`/guilds/${cfg.guild}/roles`),explicit=option(i,'rol'),matches=roles.filter(r=>explicit?r.id===explicit:r.name.trim().toLowerCase()==='beta');
