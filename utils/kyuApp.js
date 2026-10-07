@@ -3,7 +3,7 @@ const { createService } = require('./kyu-backend/server.cjs');
 const { commands } = require('./kyu-backend/commands.cjs');
 const names = new Set(commands.map(c => c.name));
 const KYU_GUILD_ID = '1510011417712132117';
-const KYU_ROLES = { player: '1553753550251622550', pro: '1553753551187091546', proplus: '1553753552080343162', beta: '1556085795998146641', ver: '1556085812834344962' };
+const KYU_ROLES = { player: '1553753550251622550', pro: '1553753551187091546', proplus: '1553753552080343162', beta: '1556085795998146641', ver: '1557420187899138089' };
 
 function configuration(env = process.env) {
   const guildId = String(env.KYU_GUILD_ID || env.DISCORD_GUILD_ID || KYU_GUILD_ID).trim();

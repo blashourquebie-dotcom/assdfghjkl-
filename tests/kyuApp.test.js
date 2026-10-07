@@ -19,7 +19,7 @@ function setup(t, overrides = {}) {
     }
     if (url.endsWith('/users/@me')) return Response.json({ id: '234567890123456789' });
     if (url.endsWith('/members/234567890123456789')) return Response.json({ user: { username: 'test' }, roles: state.roles });
-    if (url.endsWith('/roles')) return Response.json([{ id: 'player', name: 'kyu' }, { id: 'pro', name: 'pro' }, { id: 'proplus', name: 'pro+' }, {id:'1556085795998146641',name:'beta'}, {id:'1556085812834344962',name:'ver'}]);
+    if (url.endsWith('/roles')) return Response.json([{ id: 'player', name: 'kyu' }, { id: 'pro', name: 'pro' }, { id: 'proplus', name: 'pro+' }, {id:'1556085795998146641',name:'beta'}, {id:'1557420187899138089',name:'ver'}]);
     throw new Error('Unexpected mock request: ' + url);
   };
   const integration = createIntegration(env, transport);
@@ -175,5 +175,5 @@ test('real Kyu role IDs authenticate despite stale saved roles; stale IDs no lon
   state.roles=['obsolete-player'];
   const revoked=await request('/v1/me',{headers:{Authorization:'Bearer '+session.token}});
   assert.equal(revoked.status,403);
-  assert.match((await revoked.json()).error,/1553753550251622550/);
+  assert.match((await revoked.json()).error,/KYU_VER_ROLE_ID/);
 });

@@ -22,9 +22,9 @@ function createService(env=process.env,transport=fetch){
  }
  const community=createCommunity({db,save,discord,cfg,env});
  async function identity(id){
-  if(!cfg.playerRole)throw new Error('El bot todavía no tiene configurado el ID del rol Kyu. Un administrador debe ejecutar /instalaciónkyu y guardar KYU_PLAYER_ROLE_ID en Railway.');
+  if(![cfg.ver,cfg.pro,cfg.proplus,cfg.beta,cfg.playerRole].some(Boolean))throw new Error('Configurá al menos un rol de acceso: KYU_VER_ROLE_ID, KYU_PRO_ROLE_ID, KYU_PRO_PLUS_ROLE_ID o KYU_BETA_ROLE_ID.');
   const member=await discord(`/guilds/${cfg.guild}/members/${id}`);const rights=authorize(member,cfg);
-  if(!rights.allowed)throw Object.assign(new Error(`La cuenta ${member.user?.username||id} no tiene el rol Kyu configurado (ID ${cfg.playerRole}) en el servidor ${cfg.guild}. Si ya tenés el rol kyu, revisá su ID en KYU_PLAYER_ROLE_ID; el nombre no alcanza.`),{status:403});
+  if(!rights.allowed)throw Object.assign(new Error(`La cuenta ${member.user?.username||id} no tiene un rol de acceso configurado en el servidor ${cfg.guild}. Verificá KYU_VER_ROLE_ID (Ver), Pro, Pro+ o Beta. No es obligatorio tener Kyu ni que el bot haya asignado el rol.`),{status:403});
   return {id,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,accessRoles:[cfg.playerRole,cfg.pro,cfg.proplus,cfg.beta,cfg.ver].filter(r=>r&&member.roles.includes(r)),...rights};
  }
  async function session(req){const credential=(req.headers.authorization||'').replace(/^Bearer /,'');const key=hash(credential);let s=sessions.get(key);const stored=db.accessSessions[key];if(!s&&stored)s={user:{id:stored.id},expires:stored.expires,lastSeen:0};if(!s||s.expires<Date.now()){sessions.delete(key);if(stored){delete db.accessSessions[key];save();}throw new Error('Sesión vencida. Volvé a vincular Discord.');}try{s.user=await identity(s.user.id);}catch(e){if(e.status===403||e.status===401){sessions.delete(key);delete db.accessSessions[key];save();}throw e;}sessions.set(key,s);return s;}
@@ -60,7 +60,7 @@ function createService(env=process.env,transport=fetch){
    db.roles={playerRole:cfg.playerRole,pro:cfg.pro,proplus:cfg.proplus,beta:cfg.beta,ver:cfg.ver};save();return {content:`Roles Kyu, Pro y Pro+ configurados. El bot debe estar por encima de ellos.\nPara conservar estos IDs tras un despliegue, guardá en Railway:\nKYU_PLAYER_ROLE_ID=${cfg.playerRole}\nKYU_PRO_ROLE_ID=${cfg.pro}\nKYU_PRO_PLUS_ROLE_ID=${cfg.proplus}\nNo hace falta quitarte ni volver a asignarte un rol que ya tenés.`};
   }
   if(name==='plan'){
-   const id=option(i,'usuario'),plan=option(i,'plan'),expires=Date.now()+duration(option(i,'tiempo'));if(!['pro','proplus','playerRole','beta','ver'].includes(plan)||!cfg[plan]||!cfg.playerRole)throw new Error('Ejecutá /instalaciónkyu primero.');
+   const id=option(i,'usuario'),plan=option(i,'plan'),expires=Date.now()+duration(option(i,'tiempo'));if(!['pro','proplus','playerRole','beta','ver'].includes(plan)||!cfg[plan])throw new Error('Ejecutá /instalaciónkyu primero.');
    await discord(`/guilds/${cfg.guild}/members/${id}/roles/${cfg[plan]}`,'PUT');
    const other=plan==='pro'?cfg.proplus:plan==='proplus'?cfg.pro:null;if(other)await discord(`/guilds/${cfg.guild}/members/${id}/roles/${other}`,'DELETE');db.plans[id]={plan,expires};save();const warning=await logPlan(user,id,plan,expires);return {content:warning+`Plan ${plan} para <@${id}> hasta <t:${Math.floor(expires/1000)}:f>. El rol jugador se administra por separado.`};
   }
