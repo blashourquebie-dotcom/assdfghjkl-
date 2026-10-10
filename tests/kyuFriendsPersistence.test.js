@@ -1,0 +1,11 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{once}=require('node:events'),{hash}=require('../utils/kyu-backend/access.cjs'),{createService}=require('../utils/kyu-backend/server.cjs');
+test('friends survive exit from party and full backend restart; social polling caches role queries',async()=>{
+ const file=path.join(fs.mkdtempSync(path.join(os.tmpdir(),'kyu-friends-')),'db.json'),a='123456789012345678',b='223456789012345678',credential='test-only';
+ fs.writeFileSync(file,JSON.stringify({users:{[a]:{username:'A'},[b]:{username:'B'}},friends:[{from:a,to:b,accepted:true}],accessSessions:{[hash(credential)]:{id:a,expires:Date.now()+600000}},groups:{party:{id:'party',leader:a,hoster:a,members:[a,b],invites:{}}}}));
+ let service,origin,calls=0;
+ const start=async()=>{service=createService({DATA_FILE:file,DISCORD_GUILD_ID:'test',DISCORD_CLIENT_ID:'test',DISCORD_CLIENT_SECRET:'test',DISCORD_BOT_TOKEN:'test',PUBLIC_URL:'https://test.invalid'},async()=>{calls++;return {ok:true,status:200,json:async()=>({user:{id:a,username:'A'},roles:[]})};});service.start(0);await once(service.server,'listening');origin='http://127.0.0.1:'+service.server.address().port;};
+ const stop=async()=>{const closed=once(service.server,'close');service.close();await closed;};
+ const call=async(route,data)=>{const r=await fetch(origin+route,{method:data?'POST':'GET',headers:{Authorization:'Bearer '+credential,'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});assert.equal(r.status,200);return r.json();};
+ await start();try{assert.equal((await call('/v1/friends/list')).friends[0].id,b);for(let n=0;n<5;n++)await call('/v1/groups/state');assert.equal(calls,1);await call('/v1/groups/leave',{});assert.equal((await call('/v1/friends/list')).friends[0].id,b);}finally{await stop();}
+ await start();try{const friends=(await call('/v1/friends/list')).friends;assert.equal(friends.length,1);assert.equal(friends[0].status,'friend');assert.equal((await call('/v1/groups/state')).group,null);const db=JSON.parse(fs.readFileSync(file));assert.equal(db.groups.party.leader,b);assert.ok(db.accessSessions[hash(credential)]);}finally{await stop();}
+});

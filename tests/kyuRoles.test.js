@@ -12,13 +12,13 @@ function create(env={},roles=[]){
  });
  return {service,calls};
 }
-test('missing configuration is not reported as missing membership',async()=>{
+test('Discord failure is not reported as a missing Kyu role',async()=>{
  const {service,calls}=create();
- await assert.rejects(service.command({...admin,member:{...admin.member,permissions:'0'},data:{name:'cv'}}),/no tiene configurado el ID/);
- assert.equal(calls.length,0);
+ await assert.rejects(service.command({...admin,member:{...admin.member,permissions:'0'},data:{name:'cv'}}),error=>error.status===503&&/Discord no disponible/.test(error.message));
+ assert.ok(calls.length>0);
 });
 test('installation uses explicit IDs and reports them for persistent configuration',async()=>{
- const {service}=create({KYU_PLAYER_ROLE_ID:'chosen'},[{id:'duplicate',name:'kyu'},{id:'chosen',name:'kyu'},{id:'pro',name:'pro'},{id:'plus',name:'pro+'}]);
+ const {service}=create({KYU_PLAYER_ROLE_ID:'chosen'},[{id:'duplicate',name:'kyu'},{id:'chosen',name:'kyu'},{id:'pro',name:'pro'},{id:'plus',name:'pro+'},{id:'beta',name:'beta'},{id:'ver',name:'ver'}]);
  const result=await service.command(admin);
  assert.match(result.content,/KYU_PLAYER_ROLE_ID=chosen/);
  assert.equal(service.cfg.playerRole,'chosen');
