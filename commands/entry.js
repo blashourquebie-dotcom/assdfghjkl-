@@ -163,7 +163,7 @@ module.exports = {
 
     return interaction.reply({
       content: replaceRow || explicitSlot !== null
-        ? `✅ Club **${clubEntry.name}** ocupó el Cupo ${explicitSlot ?? replaceRow.posicion}${replaceRow ? ` de **${replaceRow.club?.nombre}**` : ''} en **${torneo.nombre}** (${modality}). Los partidos ya jugados conservan su historial.`
+        ? `✅ Club **${clubEntry.name}** ocupó el Cupo ${explicitSlot ?? replaceRow.posicion}${replaceRow ? ` de **${replaceRow.club?.nombre}**` : ''} en **${torneo.nombre}** (${modality}). Los resultados y estadísticas pasan al club entrante; el fixture conserva el reemplazo.`
         : `✅ Club **${clubEntry.name}** inscrito en **${torneo.nombre}** (${modality}).`,
       flags: 64
     });

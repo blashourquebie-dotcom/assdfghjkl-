@@ -67,7 +67,7 @@ module.exports = {
         }
         throw new Error(result.error || 'No se pudo reemplazar.');
       }
-      return interaction.editReply({ content: `**${incoming.name}** reemplazó a **${outgoing.nombre}** en ${result.data} torneo(s). Conserva los cupos; los partidos jugados mantienen su historial.` });
+      return interaction.editReply({ content: `**${incoming.name}** reemplazó a **${outgoing.nombre}** en ${result.data} torneo(s). Los resultados y estadísticas pasan al club entrante; el fixture conserva el reemplazo.` });
     } catch (error) {
       return interaction.editReply({ content: `No se realizó el reemplazo: ${error.message}` });
     }

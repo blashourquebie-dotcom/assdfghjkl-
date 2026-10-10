@@ -25,9 +25,22 @@ function createService(env=process.env,transport=fetch){
   // Discord OAuth establishes identity. Roles only select benefits.
   let member;try{member=await discord(`/guilds/${cfg.guild}/members/${id}`);}catch(e){if(e.discordCode!==10007)throw e;member={roles:[],user:oauthUser||db.users[id]||{id}};}const rights=authorize(member,cfg);
   // No role or bot-assigned plan is required for basic access.
-  return {id,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,accessRoles:[cfg.playerRole,cfg.pro,cfg.proplus,cfg.beta,cfg.ver].filter(r=>r&&member.roles.includes(r)),...rights};
+  const avatar=member.user?.avatar&&/^[a-zA-Z0-9_]+$/.test(member.user.avatar)?'https://cdn.discordapp.com/avatars/'+id+'/'+member.user.avatar+'.png':'https://cdn.discordapp.com/embed/avatars/0.png';
+  const username=member.user?.global_name||member.user?.username||db.users[id]?.username||id;
+  if(db.users[id]?.avatar!==avatar||db.users[id]?.username!==username||db.users[id]?.tier!==rights.tier){db.users[id]={...db.users[id],username,avatar,tier:rights.tier};save();}
+  return {id,avatar,username:member.user?.global_name||member.user?.username||db.users[id]?.username||id,accessRoles:[cfg.playerRole,cfg.pro,cfg.proplus,cfg.beta,cfg.ver].filter(r=>r&&member.roles.includes(r)),...rights};
  }
- async function session(req){const credential=(req.headers.authorization||'').replace(/^Bearer /,'');const key=hash(credential);let s=sessions.get(key);const stored=db.accessSessions[key];if(!s&&stored)s={user:{id:stored.id},expires:stored.expires,lastSeen:0};if(!s||s.expires<Date.now()){sessions.delete(key);if(stored){delete db.accessSessions[key];save();}throw new Error('Sesión vencida. Volvé a vincular Discord.');}try{s.user=await identity(s.user.id);}catch(e){if(e.status===403||e.status===401){sessions.delete(key);delete db.accessSessions[key];save();}throw e;}sessions.set(key,s);return s;}
+ async function session(req){
+  const credential=(req.headers.authorization||'').replace(/^Bearer /,''),key=hash(credential);let s=sessions.get(key);const stored=db.accessSessions[key];
+  if(!s&&stored)s={user:{id:stored.id},expires:stored.expires,lastSeen:0};
+  if(!s||s.expires<Date.now()){sessions.delete(key);if(stored){delete db.accessSessions[key];save();}throw new Error('Sesión vencida. Volvé a vincular Discord.');}
+  const social=/^\/v1\/(groups|friends)\//.test(req.url);
+  if(!social||!s.checkedAt||Date.now()-s.checkedAt>=30000){
+   try{s.user=await identity(s.user.id);s.checkedAt=Date.now();}
+   catch(e){if(e.status===403||e.status===401){sessions.delete(key);delete db.accessSessions[key];save();}throw e;}
+  }
+  sessions.set(key,s);return s;
+ }
  const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value))};
  async function read(req){let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>32768)throw new Error('Solicitud demasiado grande.');chunks.push(c)}return Buffer.concat(chunks);}
  const option=(i,name)=>i.data?.options?.find(o=>o.name===name)?.value;
@@ -79,7 +92,10 @@ function createService(env=process.env,transport=fetch){
   let changed=false;for(const [key,v]of Object.entries(db.accessSessions))if(v.expires<now){delete db.accessSessions[key];changed=true;}if(changed)save();for(const [id,seen]of present)if(now-seen>75000)present.delete(id);
  }
  const server=http.createServer(async(req,res)=>{try{
-  const url=new URL(req.url,'http://localhost');const ip=req.socket.remoteAddress;let rate=rates.get(ip);if(!rate||Date.now()-rate.at>60000){rate={at:Date.now(),n:0};rates.set(ip,rate)}if(++rate.n>300)return json(res,429,{ok:false,error:'Demasiadas solicitudes.'});
+  const url=new URL(req.url,'http://localhost');const ip=req.socket.remoteAddress;
+  const known=db.accessSessions[hash((req.headers.authorization||'').replace(/^Bearer /,''))];
+  const rateKey=known&&known.expires>Date.now()?'user:'+known.id:'ip:'+ip;
+  let rate=rates.get(rateKey);if(!rate||Date.now()-rate.at>60000){rate={at:Date.now(),n:0};rates.set(rateKey,rate)}if(++rate.n>300)return json(res,429,{ok:false,error:'Demasiadas solicitudes.'});
   if(url.pathname==='/health')return json(res,200,{ok:true,configured:ready()});
   if(url.pathname==='/interactions'&&req.method==='POST'){
    const raw=await read(req);if(!verifyInteraction(raw,req.headers['x-signature-ed25519'],req.headers['x-signature-timestamp'],env.DISCORD_PUBLIC_KEY))return json(res,401,{error:'Firma inválida'});const i=JSON.parse(raw);if(i.type===1)return json(res,200,{type:1});if(seenInteractions.has(i.id))return json(res,409,{error:'Repetido'});seenInteractions.set(i.id,Date.now());json(res,200,{type:5,data:{flags:64}});
@@ -92,7 +108,7 @@ function createService(env=process.env,transport=fetch){
   }
   if(url.pathname==='/auth/callback'){
    const state=url.searchParams.get('state')||'',cookie=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('kyu_oauth='))?.slice(10);const flow=states.get(hash(state));states.delete(hash(state));if(!flow||flow.expires<Date.now()||cookie!==state)throw new Error('Vinculación inválida o vencida.');const p=pairs.get(flow.pair);if(!p||p.expires<Date.now())throw new Error('Vinculación vencida.');
-   const r=await transport('https://discord.com/api/v10/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:'authorization_code',code:url.searchParams.get('code')||'',redirect_uri:env.PUBLIC_URL+'/auth/callback'}),signal:AbortSignal.timeout(12000)});if(!r.ok)throw new Error('Discord rechazó la autorización.');const credentials=await r.json();const discordUser=await discord('/users/@me','GET',undefined,'Bearer '+credentials.access_token);p.user=await identity(discordUser.id,discordUser);db.users[p.user.id]={username:p.user.username};save();res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','Set-Cookie':'kyu_oauth=; HttpOnly; Secure; SameSite=Lax; Path=/auth; Max-Age=0'});res.end('Discord vinculado a KyuApp. Podés volver a la aplicación.');return;
+   const r=await transport('https://discord.com/api/v10/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:env.DISCORD_CLIENT_ID,client_secret:env.DISCORD_CLIENT_SECRET,grant_type:'authorization_code',code:url.searchParams.get('code')||'',redirect_uri:env.PUBLIC_URL+'/auth/callback'}),signal:AbortSignal.timeout(12000)});if(!r.ok)throw new Error('Discord rechazó la autorización.');const credentials=await r.json();const discordUser=await discord('/users/@me','GET',undefined,'Bearer '+credentials.access_token);p.user=await identity(discordUser.id,discordUser);db.users[p.user.id]={...db.users[p.user.id],username:p.user.username,avatar:p.user.avatar};save();res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','Set-Cookie':'kyu_oauth=; HttpOnly; Secure; SameSite=Lax; Path=/auth; Max-Age=0'});res.end('Discord vinculado a KyuApp. Podés volver a la aplicación.');return;
   }
   if(url.pathname==='/v1/pair/status'&&req.method==='POST'){const b=JSON.parse(await read(req));const p=pairs.get(b.id);if(!p||p.expires<Date.now()||hash(String(b.secret||''))!==p.secretHash)throw new Error('Vinculación inválida o vencida.');if(!p.user)return json(res,200,{ok:true,ready:false});const bearer=token();const expires=Date.now()+SESSION_TTL;sessions.set(hash(bearer),{user:p.user,expires,lastSeen:0});db.accessSessions[hash(bearer)]={id:p.user.id,expires};save();pairs.delete(b.id);return json(res,200,{ok:true,ready:true,token:bearer,user:p.user});}
   const s=await session(req);
@@ -101,7 +117,7 @@ function createService(env=process.env,transport=fetch){
   if(url.pathname==='/v1/logout'&&req.method==='POST'){const key=hash((req.headers.authorization||'').replace(/^Bearer /,''));if(groups.run(s.user.id,'state').group)groups.run(s.user.id,'leave');present.delete(s.user.id);sessions.delete(key);delete db.accessSessions[key];save();return json(res,200,{ok:true});}
   if(url.pathname.startsWith('/v1/groups/')){const action=url.pathname.slice('/v1/groups/'.length);if(req.method!=='POST'&&!(action==='state'&&req.method==='GET'))throw Error('Método inválido.');const data=req.method==='POST'?JSON.parse(await read(req)):{};return json(res,200,{ok:true,self:{id:s.user.id,username:s.user.username},...groups.run(s.user.id,action,data)});}
   if(url.pathname.startsWith('/v1/friends/')){
-   const id=s.user.id;if(url.pathname.endsWith('/list')){const friends=db.friends.filter(f=>f.from===id||f.to===id).map(f=>{const other=f.from===id?f.to:f.from;return {id:other,username:db.users[other]?.username||other,online:!!f.accepted&&present.has(other)&&Date.now()-present.get(other)<75000,status:f.accepted?'friend':f.to===id?'incoming':'pending'}});return json(res,200,{ok:true,friends});}
+   const id=s.user.id;if(url.pathname.endsWith('/list')){const friends=db.friends.filter(f=>f.from===id||f.to===id).map(f=>{const other=f.from===id?f.to:f.from;return {id:other,avatar:db.users[other]?.avatar,tier:db.users[other]?.tier,username:db.users[other]?.username||other,online:!!f.accepted&&present.has(other)&&Date.now()-present.get(other)<75000,status:f.accepted?'friend':f.to===id?'incoming':'pending'}});return json(res,200,{ok:true,friends});}
    if(req.method!=='POST')throw new Error('Método inválido.');const b=JSON.parse(await read(req));if(!/^\d{17,20}$/.test(b.id)||b.id===id||!db.users[b.id])throw new Error('Ese usuario debe vincular KyuApp primero.');
    if(url.pathname.endsWith('/request')){if(!db.friends.some(f=>(f.from===id&&f.to===b.id)||(f.from===b.id&&f.to===id)))db.friends.push({from:id,to:b.id,accepted:false});}
    else if(url.pathname.endsWith('/accept')){const f=db.friends.find(f=>f.to===id&&f.from===b.id);if(!f)throw new Error('Solicitud inexistente.');f.accepted=true;}

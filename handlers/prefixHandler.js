@@ -136,8 +136,15 @@ const normalizeNaturalCommand = (raw) => String(raw || "")
 
 const getNaturalCancelCommand = (message, cfg) => {
   if (!cfg.forumClubs?.[message.channel?.id] && !cfg.forumClubs?.[message.channel?.parentId]) return null;
-  const firstWord = normalizeNaturalCommand(String(message.content || "").split(/\s+/)[0]);
-  return NATURAL_CANCEL_WORDS.has(firstWord) ? "cancelo" : null;
+  const text = normalizeNaturalCommand(message.content);
+  const firstWord = text.split(/\s+/)[0];
+  if (NATURAL_CANCEL_WORDS.has(firstWord)) return "cancelo";
+  // Natural self-cancellation in the club forum. It never accepts a target:
+  // the author is always the only player that can be cancelled this way.
+  return /^(?:me\s+)?(?:cancela(?:rme)?|cancelo|cancel(?:ar)?|canselo|canselar|cencelo|cencelar)(?:\s+(?:del|de)\s+(?:club|equipo))?\.?$/.test(text)
+    || /^(?:me\s+)?(?:retiro|voy|bajo)(?:\s+(?:del|de)\s+(?:club|equipo))?\.?$/.test(text)
+    ? "cancelo"
+    : null;
 };
 
 const isFichajeRequestMessage = (message, cfg) => {
@@ -528,6 +535,13 @@ module.exports = async (client) => {
         if (repliedMessage?.delete) await repliedMessage.delete().catch(() => null);
       }
     };
+
+    // Inside a linked club forum, a player may cancel only their own role.
+    // Prefix and natural variants have no target option, so they cannot remove
+    // anybody else through this shortcut.
+    fakeInteraction.allowLinkedPlayerSelfCancel = effectiveCommandName === 'cancelo'
+      && Boolean(cfg.forumClubs?.[message.channel.id] || cfg.forumClubs?.[message.channel.parentId])
+      && !optionMap.usuarios;
 
     commandAccess.grantDelegatedPermissions(fakeInteraction);
 
