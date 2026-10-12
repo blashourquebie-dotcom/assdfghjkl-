@@ -71,6 +71,7 @@ function createIntegration(env = process.env, transport = fetch) {
     await i.deferReply({ flags: 64 });
     try {
       const raw = {
+        id: i.id,
         type: i.isChatInputCommand?.() ? 2 : 3,
         guild_id: i.guildId || i.guild.id,
         channel_id: i.channelId,

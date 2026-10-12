@@ -12,6 +12,7 @@ function createService(env=process.env,transport=fetch){
  const save=()=>{fs.mkdirSync(path.dirname(dataFile),{recursive:true});fs.writeFileSync(dataFile+'.tmp',JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(dataFile+'.tmp',dataFile)};
  const pairs=new Map(),states=new Map(),sessions=new Map(),rates=new Map(),seenInteractions=new Map(),present=new Map();
  const groups=require('./groups.cjs').createGroups(db,save);
+ const economy=require('./suprs.cjs').createEconomy(db,save);
  db.accessSessions=db.accessSessions||{};const SESSION_TTL=30*86400000;
  const ready=()=>!!(env.DISCORD_CLIENT_ID&&env.DISCORD_CLIENT_SECRET&&env.DISCORD_BOT_TOKEN&&cfg.guild&&env.PUBLIC_URL);
  async function discord(route,method='GET',body,auth='Bot '+env.DISCORD_BOT_TOKEN){
@@ -49,7 +50,9 @@ function createService(env=process.env,transport=fetch){
  async function command(i){
   const user=i.member?.user?.id;const name=i.data?.name;
   if(i.guild_id!==cfg.guild||!user)throw new Error('Servidor no autorizado.');
-  const admin=isAdmin(i,cfg.guild);if(i.type===2&&!['cv','ticketcerrar'].includes(name)&&!admin)throw new Error('Necesitás Administrar servidor.');
+  const admin=isAdmin(i,cfg.guild);if(i.type===2&&!['cv','ticketcerrar','suprs'].includes(name)&&!admin)throw new Error('Necesitás Administrar servidor.');
+  if(name==='darsupr'){const id=option(i,'usuario'),amount=option(i,'cantidad');const result=economy.credit(id,amount,user,i.id);return {flags:64,content:`Acreditados ${amount} SUPRs a <@${id}>. Saldo: ${result.balance} SUPRs. Registro: ${i.id}.`,allowed_mentions:{parse:[]}};}
+  if(name==='suprs'){const id=option(i,'usuario')||user;if(id!==user&&!admin)throw Error('Solo administradores pueden consultar otra cuenta.');const w=economy.wallet(id,option(i,'pagina'));const history=w.history.map(e=>`<t:${Math.floor(e.at/1000)}:f> · ${e.type==='credit'?'+':'−'}${e.amount} SUPRs · ${e.type==='credit'?'Acreditación por staff':e.item}`).join('\n');return {flags:64,content:`SUPRs · <@${id}>\nSaldo: **${w.balance}** · Recibidos: **${w.received}** · Gastados: **${w.spent}**\nPágina ${w.page}/${w.pages}\n${history||'Sin movimientos.'}`,allowed_mentions:{parse:[]}};}
   const communityResult=await community.command(i);if(communityResult)return communityResult;
   if(i.type===3&&i.data.custom_id==='kyu:ticket'){
    const kind=i.data.values?.[0];if(!['comprar','crear','reclamar','consultar'].includes(kind))throw new Error('Motivo inválido.');
@@ -115,6 +118,8 @@ function createService(env=process.env,transport=fetch){
   if(url.pathname==='/v1/me')return json(res,200,{ok:true,user:s.user});
   if(url.pathname==='/v1/heartbeat'&&req.method==='POST'){const now=Date.now(),was=present.get(s.user.id)||0;s.lastSeen=now;if(db.presence&&now-was>75000){try{await discord(`/channels/${db.presence.channel}/messages`,'POST',{embeds:[{color:0xffadd0,title:s.user.username.slice(0,256),description:'Entró a KyuApp',fields:[{name:'Roles de acceso',value:s.user.accessRoles.map(r=>'<@&'+r+'>').join(', ')||'Kyu'}],timestamp:new Date(now).toISOString()}],allowed_mentions:{parse:[]}});present.set(s.user.id,now);}catch{}}else present.set(s.user.id,now);return json(res,200,{ok:true,user:s.user,groupState:{self:{id:s.user.id,username:s.user.username},...groups.run(s.user.id,'state')}});}
   if(url.pathname==='/v1/logout'&&req.method==='POST'){const key=hash((req.headers.authorization||'').replace(/^Bearer /,''));if(groups.run(s.user.id,'state').group)groups.run(s.user.id,'leave');present.delete(s.user.id);sessions.delete(key);delete db.accessSessions[key];save();return json(res,200,{ok:true});}
+  if(url.pathname==='/v1/suprs'&&req.method==='GET')return json(res,200,{ok:true,wallet:economy.wallet(s.user.id),prices:economy.prices(),bundle:economy.bundle(s.user.id)});
+  if(url.pathname==='/v1/shop/redeem'&&req.method==='POST'){const b=JSON.parse(await read(req));return json(res,200,{ok:true,wallet:economy.redeem(s.user.id,b.item,b.expectedPrice),prices:economy.prices(),bundle:economy.bundle(s.user.id)});}
   if(url.pathname.startsWith('/v1/groups/')){const action=url.pathname.slice('/v1/groups/'.length);if(req.method!=='POST'&&!(action==='state'&&req.method==='GET'))throw Error('Método inválido.');const data=req.method==='POST'?JSON.parse(await read(req)):{};return json(res,200,{ok:true,self:{id:s.user.id,username:s.user.username},...groups.run(s.user.id,action,data)});}
   if(url.pathname.startsWith('/v1/friends/')){
    const id=s.user.id;if(url.pathname.endsWith('/list')){const friends=db.friends.filter(f=>f.from===id||f.to===id).map(f=>{const other=f.from===id?f.to:f.from;return {id:other,avatar:db.users[other]?.avatar,tier:db.users[other]?.tier,username:db.users[other]?.username||other,online:!!f.accepted&&present.has(other)&&Date.now()-present.get(other)<75000,status:f.accepted?'friend':f.to===id?'incoming':'pending'}});return json(res,200,{ok:true,friends});}
