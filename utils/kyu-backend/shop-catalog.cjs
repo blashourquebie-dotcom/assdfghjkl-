@@ -1,0 +1,8 @@
+'use strict';
+const rarities={common:{name:'Común',price:200,color:'#90949c'},uncommon:{name:'Poco común',price:400,color:'#4aa966'},rare:{name:'Raro',price:500,color:'#418bdf'},epic:{name:'Épico',price:1000,color:'#a764db'},legendary:{name:'Legendario',price:1200,color:'#d4aa43'},exotic:{name:'Exótico',price:1500,color:'#8c253b'}};
+// Initial editorial classification, independent of the source archive's USD prices.
+const items=[...Array.from({length:11},(_,i)=>({id:'frame-'+(i+1),category:'frame',rarity:i===0?'legendary':i===10?'exotic':i<7?'rare':'epic'})),...Array.from({length:4},(_,i)=>({id:'avatar-'+i,category:'avatar',rarity:'rare'})),{id:'plate-orbit',category:'plate',rarity:'epic'},{id:'font-rounded',category:'font',rarity:'common'},{id:'font-mono',category:'font',rarity:'common'},{id:'menu-silver',category:'menu',rarity:'uncommon'},{id:'effect-aurora',category:'effect',rarity:'epic'},...require('./archive-items.json')];
+exports.rarities=rarities;exports.items=items.map(i=>({...i,...rarities[i.rarity],rarityName:rarities[i.rarity].name,name:i.name}));
+// Argentina 22:00 is 01:00 UTC on the following date; use IANA date parts,
+// not the user's PC timezone, for the rotation identity.
+exports.rotation=function(now){const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(now).map(p=>[p.type,p.value]));let start=Date.UTC(+parts.year,+parts.month-1,+parts.day,25);if(+parts.hour<22)start-=86400000;return {key:new Date(start-10800000).toISOString().slice(0,10),expires:start+86400000};};
