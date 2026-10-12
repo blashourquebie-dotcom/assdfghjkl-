@@ -25,6 +25,10 @@ function configuration(env = process.env) {
     KYU_VER_ROLE_ID: String(env.KYU_VER_ROLE_ID || '').trim() || defaults.ver || '',
     KYU_STREAMER_ROLE_IDS: env.KYU_STREAMER_ROLE_IDS || '',
     KYU_STAFF_ROLE_ID: env.KYU_STAFF_ROLE_ID || '',
+    KYU_SUPABASE_URL: env.KYU_SUPABASE_URL || 'https://oqvzemxyfdszzvfeovbd.supabase.co',
+    KYU_SUPABASE_BUCKET: env.KYU_SUPABASE_BUCKET || 'kyu-originals',
+    KYU_SUPABASE_SECRET_KEY: env.KYU_SUPABASE_SECRET_KEY || '',
+    KYU_PRIVATE_CATALOG: env.KYU_PRIVATE_CATALOG || path.resolve(__dirname, 'kyu-backend/catalog-supabase.json'),
     DATA_FILE: env.KYU_DATA_FILE || path.resolve(__dirname, '../data/kyu-app.json'),
     KYU_BANNER_DIR: env.KYU_BANNER_DIR || path.resolve(__dirname, '../assets/banners/kyu')
   };

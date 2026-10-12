@@ -13,6 +13,7 @@ function createService(env=process.env,transport=fetch){
  const pairs=new Map(),states=new Map(),sessions=new Map(),rates=new Map(),seenInteractions=new Map(),present=new Map();
  const groups=require('./groups.cjs').createGroups(db,save);
  const economy=require('./suprs.cjs').createEconomy(db,save);
+ const originals=require('./private-assets.cjs').create({manifest:env.KYU_PRIVATE_CATALOG,owned:id=>economy.wallet(id).owned,transport,storage:require('./supabase-storage.cjs').createStorage(env,transport)});
  db.accessSessions=db.accessSessions||{};const SESSION_TTL=30*86400000;
  const ready=()=>!!(env.DISCORD_CLIENT_ID&&env.DISCORD_CLIENT_SECRET&&env.DISCORD_BOT_TOKEN&&cfg.guild&&env.PUBLIC_URL);
  async function discord(route,method='GET',body,auth='Bot '+env.DISCORD_BOT_TOKEN){
@@ -54,6 +55,13 @@ function createService(env=process.env,transport=fetch){
   if(name==='darsupr'){const id=option(i,'usuario'),amount=option(i,'cantidad');const result=economy.credit(id,amount,user,i.id);return {flags:64,content:`Acreditados ${amount} SUPRs a <@${id}>. Saldo: ${result.balance} SUPRs. Registro: ${i.id}.`,allowed_mentions:{parse:[]}};}
   if(name==='suprs'){const id=option(i,'usuario')||user;if(id!==user&&!admin)throw Error('Solo administradores pueden consultar otra cuenta.');const w=economy.wallet(id,option(i,'pagina'));const history=w.history.map(e=>`<t:${Math.floor(e.at/1000)}:f> · ${e.type==='credit'?'+':'−'}${e.amount} SUPRs · ${e.type==='credit'?'Acreditación por staff':e.item}`).join('\n');return {flags:64,content:`SUPRs · <@${id}>\nSaldo: **${w.balance}** · Recibidos: **${w.received}** · Gastados: **${w.spent}**\nPágina ${w.page}/${w.pages}\n${history||'Sin movimientos.'}`,allowed_mentions:{parse:[]}};}
   const communityResult=await community.command(i);if(communityResult)return communityResult;
+  if(name==='compras'){
+   if(!admin)throw Error('Necesitás Administrar servidor.');
+   const id=option(i,'usuario'),w=economy.wallet(id,option(i,'pagina')),catalog=require('./shop-catalog.cjs').items;
+   const label=id=>String(catalog.find(p=>p.id===id)?.name||id).replace(/[\r\n`*_<>]/g,'').slice(0,80);
+   const entries=w.history.map(e=>'<t:'+Math.floor(e.at/1000)+':f> · **'+(e.type==='credit'?'+':'−')+e.amount+' SUPRs**\n'+(e.type==='credit'?'Acreditación manual · staff <@'+e.actor+'> · registro '+e.receipt:'Canje: '+(e.items||[e.item]).map(label).join(' + ')));
+   return {flags:64,allowed_mentions:{parse:[]},embeds:[{title:'Compras y acreditaciones · KyuApp',description:('<@'+id+'> · ID: '+id+'\n\n'+(entries.join('\n\n')||'Sin movimientos.')).slice(0,4000),fields:[{name:'Saldo',value:String(w.balance),inline:true},{name:'Adquiridos',value:String(w.received),inline:true},{name:'Gastados',value:String(w.spent),inline:true}],footer:{text:'Página '+w.page+'/'+w.pages+' · Registro interno de SUPRs; no verifica pagos de Kick.'}}]};
+  }
   if(i.type===3&&i.data.custom_id==='kyu:ticket'){
    const kind=i.data.values?.[0];if(!['comprar','crear','reclamar','consultar'].includes(kind))throw new Error('Motivo inválido.');
    const old=Object.values(db.tickets).find(t=>t.user===user&&!t.closed);if(old)return {content:`Ya tenés un ticket: <#${old.channel}>`};
@@ -119,6 +127,14 @@ function createService(env=process.env,transport=fetch){
   if(url.pathname==='/v1/heartbeat'&&req.method==='POST'){const now=Date.now(),was=present.get(s.user.id)||0;s.lastSeen=now;if(db.presence&&now-was>75000){try{await discord(`/channels/${db.presence.channel}/messages`,'POST',{embeds:[{color:0xffadd0,title:s.user.username.slice(0,256),description:'Entró a KyuApp',fields:[{name:'Roles de acceso',value:s.user.accessRoles.map(r=>'<@&'+r+'>').join(', ')||'Kyu'}],timestamp:new Date(now).toISOString()}],allowed_mentions:{parse:[]}});present.set(s.user.id,now);}catch{}}else present.set(s.user.id,now);return json(res,200,{ok:true,user:s.user,groupState:{self:{id:s.user.id,username:s.user.username},...groups.run(s.user.id,'state')}});}
   if(url.pathname==='/v1/logout'&&req.method==='POST'){const key=hash((req.headers.authorization||'').replace(/^Bearer /,''));if(groups.run(s.user.id,'state').group)groups.run(s.user.id,'leave');present.delete(s.user.id);sessions.delete(key);delete db.accessSessions[key];save();return json(res,200,{ok:true});}
   if(url.pathname==='/v1/suprs'&&req.method==='GET')return json(res,200,{ok:true,wallet:economy.wallet(s.user.id),prices:economy.prices(),bundle:economy.bundle(s.user.id)});
+  if(url.pathname==='/v1/shop/original'&&req.method==='POST'){const b=JSON.parse(await read(req));return json(res,200,{ok:true,item:await originals.item(s.user.id,b.id)});}
+  if(url.pathname==='/v1/shop/style'){
+   const owned=economy.wallet(s.user.id).owned,catalog=require('./shop-catalog.cjs').items;
+   const clean=value=>Object.fromEntries(Object.entries(value||{}).filter(([key,id])=>owned.includes(id)&&catalog.some(i=>i.id===id&&i.category===key)));
+   if(req.method==='POST'){const b=JSON.parse(await read(req));const style=clean(b.style);if(Object.keys(style).length!==Object.keys(b.style||{}).length)throw Object.assign(Error('Selección no adquirida o inválida.'),{status:403});db.users[s.user.id]={...db.users[s.user.id],profileStyle:style};save();return json(res,200,{ok:true,style});}
+   if(req.method==='GET')return json(res,200,{ok:true,style:clean(db.users[s.user.id]?.profileStyle)});
+   throw Error('Método inválido.');
+  }
   if(url.pathname==='/v1/shop/redeem'&&req.method==='POST'){const b=JSON.parse(await read(req));return json(res,200,{ok:true,wallet:economy.redeem(s.user.id,b.item,b.expectedPrice),prices:economy.prices(),bundle:economy.bundle(s.user.id)});}
   if(url.pathname.startsWith('/v1/groups/')){const action=url.pathname.slice('/v1/groups/'.length);if(req.method!=='POST'&&!(action==='state'&&req.method==='GET'))throw Error('Método inválido.');const data=req.method==='POST'?JSON.parse(await read(req)):{};return json(res,200,{ok:true,self:{id:s.user.id,username:s.user.username},...groups.run(s.user.id,action,data)});}
   if(url.pathname.startsWith('/v1/friends/')){

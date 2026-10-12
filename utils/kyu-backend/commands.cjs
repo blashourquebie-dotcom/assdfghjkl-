@@ -1,5 +1,6 @@
 const opt=(name,description,type,required=true,extra={})=>({name,description,type,required,...extra});
 const commands=[
+ {name:'compras',description:'Staff: consulta canjes y acreditaciones de SUPRs.',options:[opt('usuario','Usuario cuyo historial consultar',6),opt('pagina','Página del historial',4,false,{min_value:1})]},
  {name:'darsupr',description:'Acredita SUPRs después de validar una compra en Kick.',options:[opt('usuario','Cuenta que recibe SUPRs',6),opt('cantidad','SUPRs a acreditar',4,true,{min_value:1,max_value:1000000})]},
  {name:'suprs',description:'Consulta saldo, puntos recibidos e historial de gastos.',options:[opt('usuario','Otra cuenta (solo administradores)',6,false),opt('pagina','Página del historial',4,false,{min_value:1})]},
  {name:'instalaciónkyu',description:'Crea los roles jugador Kyu, Pro y Pro+.'},
